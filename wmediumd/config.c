@@ -167,8 +167,8 @@ static int calc_path_loss_itu(void *model_param,
 	/*
 	 * Calculate signal strength with ITU path loss model
 	 * Power Loss Coefficient Based on the Paper
-     * Site-Specific Validation of ITU Indoor Path Loss Model at 2.4 GHz
-     * from Theofilos Chrysikos, Giannis Georgopoulos and Stavros Kotsopoulos
+         * Site-Specific Validation of ITU Indoor Path Loss Model at 2.4 GHz
+         * from Theofilos Chrysikos, Giannis Georgopoulos and Stavros Kotsopoulos
 	 */
 	PL = 20.0 * log10(FREQ_1CH) + N * log10(d) + param->LF * param->nFLOORS - 28;
 	return PL;
