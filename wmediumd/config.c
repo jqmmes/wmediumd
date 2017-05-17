@@ -155,7 +155,7 @@ static int calc_path_loss_itu(void *model_param,
 {
 	struct itu_model_param *param;
 	double PL, d;
-	int N=28, nFLOORS=0, LF=0;
+	int N=28;
 
 	param = model_param;
 
