@@ -84,6 +84,32 @@ int use_fixed_random_value(struct wmediumd *ctx)
 #define FREQ_1CH (2.412e9)		// [Hz]
 #define SPEED_LIGHT (2.99792458e8)	// [meter/sec]
 /*
+ * Calculate path loss based on a free-space path loss
+ *
+ * This function returns path loss [dBm].
+ */
+static int calc_path_loss_free_space(void *model_param,
+			  struct station *dst, struct station *src)
+{
+	double PL, d;
+
+	d = sqrt((src->x - dst->x) * (src->x - dst->x) +
+		 (src->y - dst->y) * (src->y - dst->y));
+
+	/*
+	 * Calculate PL0 with Free-space path loss in decibels
+	 *
+	 * 20 * log10 * (4 * M_PI * d * f / c)
+	 *   d: distance [meter]
+	 *   f: frequency [Hz]
+	 *   c: speed of light in a vacuum [meter/second]
+	 *
+	 * https://en.wikipedia.org/wiki/Free-space_path_loss
+	 */
+	PL = 20.0 * log10(4.0 * M_PI * d * FREQ_1CH / SPEED_LIGHT);
+	return PL;
+}
+/*
  * Calculate path loss based on a log distance model
  *
  * This function returns path loss [dBm].
