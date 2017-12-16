@@ -105,6 +105,9 @@ static int calc_path_loss_free_space(void *model_param,
 			 (src->y - dst->y) * (src->y - dst->y) +
 			 (src->z - dst->z) * (src->z - dst->z));
 
+	if (d <= 2.0)
+		d = 2;
+
 	/*
 	 * Calculate PL0 with Free-space path loss in decibels
 	 *
@@ -141,6 +144,9 @@ static int calc_path_loss_log_distance(void *model_param,
 	d = sqrt((src->x - dst->x) * (src->x - dst->x) +
 		 (src->y - dst->y) * (src->y - dst->y) +
 		 (src->z - dst->z) * (src->z - dst->z));
+
+	if (d <= 2.0)
+		d = 2;
 
 	/*
 	 * Calculate PL0 with Free-space path loss in decibels
@@ -184,6 +190,9 @@ static int calc_path_loss_itu(void *model_param,
 			 (src->y - dst->y) * (src->y - dst->y) +
 			 (src->z - dst->z) * (src->z - dst->z));
 
+	if (d <= 2.0)
+		d = 2;
+
 	if (d>16)
 		N=38;
 	if (pL!=0)
@@ -221,6 +230,9 @@ static int calc_path_loss_log_normal_shadowing(void *model_param,
 	d = sqrt((src->x - dst->x) * (src->x - dst->x) +
 		 (src->y - dst->y) * (src->y - dst->y) +
 		 (src->z - dst->z) * (src->z - dst->z));
+
+	if (d <= 2.0)
+		d = 2;
 
 	/*
 	 * Calculate PL0 with Free-space path loss in decibels
@@ -261,6 +273,9 @@ static int calc_path_loss_two_ray_ground(void *model_param,
 	d = sqrt((src->x - dst->x) * (src->x - dst->x) +
 			 (src->y - dst->y) * (src->y - dst->y) +
 			 (src->z - dst->z) * (src->z - dst->z));
+
+	if (d <= 2.0)
+		d = 2;
 
 	PL = 1;//(src->tx_power * src->gain * dst->gain * pow(src->height,2) * pow(dst->height,2)) / (pow(d,4) * param->sL);
 	return PL;
