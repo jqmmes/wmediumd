@@ -473,7 +473,7 @@ static int send_tx_info_frame_nl(struct wmediumd *ctx, struct frame *frame)
 	}
 	struct timespec now;
 	clock_gettime(CLOCK_REALTIME, &now);
-	w_logf(ctx, LOG_INFO, "send_tx_info_frame_nl\t%lld\t%x:%x:%x:%x:%x:%x\t%lld%ld\n", frame->cookie, frame->sender->hwaddr[0], frame->sender->hwaddr[1], frame->sender->hwaddr[2], frame->sender->hwaddr[3], frame->sender->hwaddr[4], frame->sender->hwaddr[5], now.tv_sec, now.tv_nsec/1000);
+	w_logf(ctx, LOG_INFO, "send_tx_info_frame_nl\t%lld\t%x:%x:%x:%x:%x:%x\t%lld%06ld\n", frame->cookie, frame->sender->hwaddr[0], frame->sender->hwaddr[1], frame->sender->hwaddr[2], frame->sender->hwaddr[3], frame->sender->hwaddr[4], frame->sender->hwaddr[5], now.tv_sec, now.tv_nsec/1000);
 	//w_logf(ctx, LOG_INFO, "%lld.%.9ld\t%lld\tsend_tx_info_frame_nl\n", now.tv_sec, now.tv_nsec, frame->cookie);
 	ret = nl_send_auto_complete(sock, msg);
 	if (ret < 0) {
@@ -536,7 +536,7 @@ int send_cloned_frame_msg(struct wmediumd *ctx, struct station *dst,
 
 	struct timespec now;
 	clock_gettime(CLOCK_REALTIME, &now);
-	w_logf(ctx, LOG_INFO, "send_cloned_frame_msg\t%lld\t%x:%x:%x:%x:%x:%x\t%lld%ld\n", frame->cookie, frame->sender->hwaddr[0], frame->sender->hwaddr[1], frame->sender->hwaddr[2], frame->sender->hwaddr[3], frame->sender->hwaddr[4], frame->sender->hwaddr[5], now.tv_sec, now.tv_nsec/1000);
+	w_logf(ctx, LOG_INFO, "send_cloned_frame_msg\t%lld\t%x:%x:%x:%x:%x:%x\t%lld%06ld\n", frame->cookie, frame->sender->hwaddr[0], frame->sender->hwaddr[1], frame->sender->hwaddr[2], frame->sender->hwaddr[3], frame->sender->hwaddr[4], frame->sender->hwaddr[5], now.tv_sec, now.tv_nsec/1000);
 	ret = nl_send_auto_complete(sock, msg);
 	if (ret < 0) {
 		w_logf(ctx, LOG_ERR, "%s: nl_send_auto failed\n", __func__);
@@ -787,7 +787,7 @@ static int process_messages_cb(struct nl_msg *msg, void *arg)
 
 			struct timespec now;
 			clock_gettime(CLOCK_REALTIME, &now);
-			w_logf(ctx, LOG_INFO, "process_messages_cb\t%lld\t%x:%x:%x:%x:%x:%x\t%lld%ld\n", frame->cookie, frame->sender->hwaddr[0], frame->sender->hwaddr[1], frame->sender->hwaddr[2], frame->sender->hwaddr[3], frame->sender->hwaddr[4], frame->sender->hwaddr[5], now.tv_sec, now.tv_nsec/1000);
+			w_logf(ctx, LOG_INFO, "process_messages_cb\t%lld\t%x:%x:%x:%x:%x:%x\t%lld%06ld\n", frame->cookie, frame->sender->hwaddr[0], frame->sender->hwaddr[1], frame->sender->hwaddr[2], frame->sender->hwaddr[3], frame->sender->hwaddr[4], frame->sender->hwaddr[5], now.tv_sec, now.tv_nsec/1000);
 			//w_logf(ctx, LOG_INFO, "%x:%x:%x:%x:%x:%x\n", frame->sender->hwaddr[0], frame->sender->hwaddr[1], frame->sender->hwaddr[2], frame->sender->hwaddr[3], frame->sender->hwaddr[4], frame->sender->hwaddr[5]);
 			queue_frame(ctx, sender, frame);
 			send_tx_info_frame_nl(ctx, frame);
