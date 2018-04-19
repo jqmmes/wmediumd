@@ -177,6 +177,8 @@ double get_error_prob_from_snr(double snr, unsigned int rate_idx, u32 freq,
 
 	m = rateset[rate_idx].mqam;
 	fec = rateset[rate_idx].fec;
+	//m = rateset[11].mqam;
+	//fec = rateset[11].fec;
 
 	if (m == 2)
 		ber = bpsk_ber(snr);
@@ -279,4 +281,5 @@ int index_to_rate(size_t index, u32 freq)
 		index = rate_len - 1;
 
 	return rateset[index].mbps;
+	//return rateset[11].mbps;
 }

@@ -383,6 +383,7 @@ void queue_frame(struct wmediumd *ctx, struct station *station,
 
 			/* backoff */
 			if (j > 0) {
+				w_logf(ctx, LOG_INFO, "backoff\n");
 				send_time += (cw * slot_time) / 2;
 				cw = (cw << 1) + 1;
 				if (cw > queue->cw_max)
@@ -421,11 +422,15 @@ void queue_frame(struct wmediumd *ctx, struct station *station,
 	}
 
 	timespec_add_usec(&target, send_time);
+	//timespec_add_usec(&target, 0);
 
+	//frame->duration = 0;//send_time;
+	//frame->expires = now;//target;
 	frame->duration = send_time;
 	frame->expires = target;
 	list_add_tail(&frame->list, &queue->frames);
 	rearm_timer(ctx);
+	//deliver_frame(ctx, frame);
 }
 
 /*
@@ -458,12 +463,18 @@ static int send_tx_info_frame_nl(struct wmediumd *ctx, struct frame *frame)
 	    nla_put(msg, HWSIM_ATTR_TX_INFO,
 		    frame->tx_rates_count * sizeof(struct hwsim_tx_rate),
 		    frame->tx_rates) ||
+			nla_put(msg, HWSIM_ATTR_TX_INFO_FLAGS,
+				frame->tx_rates_flag_count * sizeof( struct hwsim_tx_rate_flag),
+				frame->tx_rates_flag) ||
 	    nla_put_u64(msg, HWSIM_ATTR_COOKIE, frame->cookie)) {
 			w_logf(ctx, LOG_ERR, "%s: Failed to fill a payload\n", __func__);
 			ret = -1;
 			goto out;
 	}
-
+	struct timespec now;
+	clock_gettime(CLOCK_REALTIME, &now);
+	w_logf(ctx, LOG_INFO, "send_tx_info_frame_nl\t%lld\t%x:%x:%x:%x:%x:%x\t%lld%ld\n", frame->cookie, frame->sender->hwaddr[0], frame->sender->hwaddr[1], frame->sender->hwaddr[2], frame->sender->hwaddr[3], frame->sender->hwaddr[4], frame->sender->hwaddr[5], now.tv_sec, now.tv_nsec);
+	//w_logf(ctx, LOG_INFO, "%lld.%.9ld\t%lld\tsend_tx_info_frame_nl\n", now.tv_sec, now.tv_nsec, frame->cookie);
 	ret = nl_send_auto_complete(sock, msg);
 	if (ret < 0) {
 		w_logf(ctx, LOG_ERR, "%s: nl_send_auto failed\n", __func__);
@@ -481,7 +492,7 @@ out:
  * Send a data frame to the kernel for reception at a specific radio.
  */
 int send_cloned_frame_msg(struct wmediumd *ctx, struct station *dst,
-			  u8 *data, int data_len, int rate_idx, int signal)
+			  u8 *data, int data_len, int rate_idx, int signal, struct frame *frame)
 {
 	struct nl_msg *msg;
 	struct nl_sock *sock = ctx->sock;
@@ -503,9 +514,18 @@ int send_cloned_frame_msg(struct wmediumd *ctx, struct station *dst,
 
 	if (nla_put(msg, HWSIM_ATTR_ADDR_RECEIVER, ETH_ALEN,
 		    dst->hwaddr) ||
+			nla_put(msg, HWSIM_ATTR_ADDR_TRANSMITTER, ETH_ALEN,
+					    frame->sender->hwaddr) ||
 	    nla_put(msg, HWSIM_ATTR_FRAME, data_len, data) ||
 	    nla_put_u32(msg, HWSIM_ATTR_RX_RATE, rate_idx) ||
-	    nla_put_u32(msg, HWSIM_ATTR_SIGNAL, signal)) {
+	    nla_put_u32(msg, HWSIM_ATTR_SIGNAL, signal) ||
+			nla_put(msg, HWSIM_ATTR_TX_INFO,
+				frame->tx_rates_count * sizeof(struct hwsim_tx_rate),
+				frame->tx_rates) ||
+			nla_put(msg, HWSIM_ATTR_TX_INFO_FLAGS,
+				frame->tx_rates_flag_count * sizeof( struct hwsim_tx_rate_flag),
+				frame->tx_rates_flag) ||
+			nla_put_u64(msg, HWSIM_ATTR_COOKIE, frame->cookie)) {
 			w_logf(ctx, LOG_ERR, "%s: Failed to fill a payload\n", __func__);
 			ret = -1;
 			goto out;
@@ -514,6 +534,9 @@ int send_cloned_frame_msg(struct wmediumd *ctx, struct station *dst,
 	w_logf(ctx, LOG_DEBUG, "cloned msg dest " MAC_FMT " (radio: " MAC_FMT ") len %d\n",
 		   MAC_ARGS(dst->addr), MAC_ARGS(dst->hwaddr), data_len);
 
+	struct timespec now;
+	clock_gettime(CLOCK_REALTIME, &now);
+	w_logf(ctx, LOG_INFO, "send_cloned_frame_msg\t%lld\t%x:%x:%x:%x:%x:%x\t%lld%ld\n", frame->cookie, frame->sender->hwaddr[0], frame->sender->hwaddr[1], frame->sender->hwaddr[2], frame->sender->hwaddr[3], frame->sender->hwaddr[4], frame->sender->hwaddr[5], now.tv_sec, now.tv_nsec);
 	ret = nl_send_auto_complete(sock, msg);
 	if (ret < 0) {
 		w_logf(ctx, LOG_ERR, "%s: nl_send_auto failed\n", __func__);
@@ -578,7 +601,7 @@ void deliver_frame(struct wmediumd *ctx, struct frame *frame)
 				send_cloned_frame_msg(ctx, station,
 						      frame->data,
 						      frame->data_len,
-							  rate_idx, signal);
+							  rate_idx, signal, frame);
 
 			} else if (memcmp(dest, station->addr, ETH_ALEN) == 0) {
 				if (set_interference_duration(ctx,
@@ -589,14 +612,14 @@ void deliver_frame(struct wmediumd *ctx, struct frame *frame)
 				send_cloned_frame_msg(ctx, station,
 						      frame->data,
 						      frame->data_len,
-							  rate_idx, frame->signal);
+							  rate_idx, frame->signal, frame);
 			}
 		}
 	} else
 		set_interference_duration(ctx, frame->sender->index,
 					  frame->duration, frame->signal);
 
-	send_tx_info_frame_nl(ctx, frame);
+	//send_tx_info_frame_nl(ctx, frame);
 
 	free(frame);
 }
@@ -713,10 +736,20 @@ static int process_messages_cb(struct nl_msg *msg, void *arg)
 			struct hwsim_tx_rate *tx_rates =
 				(struct hwsim_tx_rate *)
 				nla_data(attrs[HWSIM_ATTR_TX_INFO]);
+
+		 	unsigned int tx_rates_flags_len =
+				nla_len(attrs[HWSIM_ATTR_TX_INFO_FLAGS]);
+			struct hwsim_tx_rate_flag *tx_rates_flag =
+				(struct hwsim_tx_rate_flag *)
+				nla_data(attrs[HWSIM_ATTR_TX_INFO_FLAGS]);
+
 			u64 cookie = nla_get_u64(attrs[HWSIM_ATTR_COOKIE]);
 			u32 freq;
 			freq = attrs[HWSIM_ATTR_FREQ] ?
 					nla_get_u32(attrs[HWSIM_ATTR_FREQ]) : 2412;
+			//struct timespec now;
+			//clock_gettime(CLOCK_REALTIME, &now);
+			//w_logf(ctx, LOG_INFO, "%lld.%.9ld\t%lld\tprocess_messages_cb\n", now.tv_sec, now.tv_nsec, cookie);
 
 			hdr = (struct ieee80211_hdr *)data;
 			src = hdr->addr2;
@@ -746,7 +779,18 @@ static int process_messages_cb(struct nl_msg *msg, void *arg)
 				tx_rates_len / sizeof(struct hwsim_tx_rate);
 			memcpy(frame->tx_rates, tx_rates,
 			       min(tx_rates_len, sizeof(frame->tx_rates)));
+			frame->tx_rates_flag_count =
+ 				tx_rates_flags_len / sizeof(struct hwsim_tx_rate_flag);
+			memcpy(frame->tx_rates_flag, tx_rates_flag,
+						 min(tx_rates_flags_len, sizeof(frame->tx_rates_flag)));
+
+
+			struct timespec now;
+			clock_gettime(CLOCK_REALTIME, &now);
+			w_logf(ctx, LOG_INFO, "process_messages_cb\t%lld\t%x:%x:%x:%x:%x:%x\t%lld%ld\n", frame->cookie, frame->sender->hwaddr[0], frame->sender->hwaddr[1], frame->sender->hwaddr[2], frame->sender->hwaddr[3], frame->sender->hwaddr[4], frame->sender->hwaddr[5], now.tv_sec, now.tv_nsec);
+			//w_logf(ctx, LOG_INFO, "%x:%x:%x:%x:%x:%x\n", frame->sender->hwaddr[0], frame->sender->hwaddr[1], frame->sender->hwaddr[2], frame->sender->hwaddr[3], frame->sender->hwaddr[4], frame->sender->hwaddr[5]);
 			queue_frame(ctx, sender, frame);
+			send_tx_info_frame_nl(ctx, frame);
 		}
 out:
 		pthread_rwlock_unlock(&snr_lock);
