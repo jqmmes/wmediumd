@@ -113,7 +113,6 @@ int create_listen_socket(struct wmediumd *ctx) {
 int accept_connection(int listen_soc) {
     struct sockaddr_in claddr;
     socklen_t claddr_size = sizeof(claddr);
-
     int soc = accept(listen_soc, (struct sockaddr *) &claddr, &claddr_size);
     if (soc < 0) {
         return -1;
@@ -702,14 +701,14 @@ void *run_wserver(void *ctx) {
     if (listen_soc < 0) {
         return NULL;
     }
-    w_logf(ctx, LOG_DEBUG, LOG_PREFIX "Listening for incoming connection\n");
+    w_logf(ctx, LOG_INFO, LOG_PREFIX "Listening for incoming connection\n");
 
     evutil_make_socket_nonblocking(listen_soc);
     server_event_base = event_base_new();
     accept_event = event_new(server_event_base, listen_soc, EV_READ | EV_PERSIST, on_listen_event, ctx);
     event_add(accept_event, NULL);
 
-    w_logf(ctx, LOG_DEBUG, LOG_PREFIX "Waiting for client to connect...\n");
+    w_logf(ctx, LOG_INFO, LOG_PREFIX "Waiting for client to connect...\n");
     event_base_dispatch(server_event_base);
 
     event_free(accept_event);
@@ -726,7 +725,6 @@ void stop_wserver() {
     signal(SIGINT, old_sig_handler);
     pthread_cancel(server_thread);
     pthread_detach(server_thread);
-    printf("\n" LOG_PREFIX "shutting down wserver\n");
     close(listen_soc);
     unlink(WSERVER_SOCKET_PATH);
 }

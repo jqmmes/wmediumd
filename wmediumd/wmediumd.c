@@ -35,12 +35,19 @@
 #include <limits.h>
 #include <pthread.h>
 
+#include "thpool.h"
 #include "wmediumd.h"
 #include "ieee80211.h"
 #include "config.h"
 #include "wserver.h"
 #include "wmediumd_dynamic.h"
 #include "wserver_messages.h"
+
+
+
+static struct nl_sock *nl_listen_socket;
+static int nl_listen_socket_fd;
+static int timer_fd;
 
 static inline int div_round(int a, int b)
 {
@@ -128,7 +135,7 @@ void rearm_timer(struct wmediumd *ctx)
 	int i;
 
 	bool set_min_expires = false;
-
+	//w_logf(ctx, LOG_INFO, "rearm_timer\n");
 	/*
 	 * Iterate over all the interfaces to find the next frame that
 	 * will be delivered, and set the timerfd accordingly.
@@ -150,9 +157,30 @@ void rearm_timer(struct wmediumd *ctx)
 	if (set_min_expires) {
 		memset(&expires, 0, sizeof(expires));
 		expires.it_value = min_expires;
-		timerfd_settime(ctx->timerfd, TFD_TIMER_ABSTIME, &expires,
+		ctx->min_expires_set = true;
+		ctx->min_expires = min_expires;
+		//timerfd_settime(ctx->timerfd, TFD_TIMER_ABSTIME, &expires,
+		timerfd_settime(timer_fd, TFD_TIMER_ABSTIME, &expires,
 				NULL);
 	}
+}
+
+void fast_timer_rearm(struct wmediumd *ctx, struct timespec frame_expires) {
+	struct itimerspec expires;
+	//w_logf(ctx, LOG_INFO, "process_messages_cb\t%lld\t%x:%x:%x:%x:%x:%x\t%lld%06ld\n", frame->cookie, frame->sender->hwaddr[0], frame->sender->hwaddr[1], frame->sender->hwaddr[2], frame->sender->hwaddr[3], frame->sender->hwaddr[4], frame->sender->hwaddr[5], now.tv_sec, now.tv_nsec/1000);
+	w_logf(ctx, LOG_INFO, "fast_timer_rearm\n");
+	pthread_rwlock_rdlock(&snr_lock);
+	w_logf(ctx, LOG_INFO, "fast_timer_rearm: 1\n");
+	if (ctx->min_expires_set && !timespec_before(&frame_expires, &(ctx->min_expires))) return;
+	w_logf(ctx, LOG_INFO, "fast_timer_rearm: OK\n");
+	ctx->min_expires_set = true;
+	ctx->min_expires = frame_expires;
+	memset(&expires, 0, sizeof(expires));
+	expires.it_value = frame_expires;
+	//timerfd_settime(ctx->timerfd, TFD_TIMER_ABSTIME, &expires,
+	timerfd_settime(timer_fd, TFD_TIMER_ABSTIME, &expires,
+			NULL);
+	pthread_rwlock_unlock(&snr_lock);
 }
 
 static inline bool frame_has_a4(struct frame *frame)
@@ -429,7 +457,9 @@ void queue_frame(struct wmediumd *ctx, struct station *station,
 	frame->duration = send_time;
 	frame->expires = target;
 	list_add_tail(&frame->list, &queue->frames);
-	rearm_timer(ctx);
+	//rearm_timer(ctx);
+	w_logf(ctx, LOG_INFO, "Frame %ld:\t", frame->cookie);
+	fast_timer_rearm(ctx, frame->expires);
 	//deliver_frame(ctx, frame);
 }
 
@@ -438,7 +468,7 @@ void queue_frame(struct wmediumd *ctx, struct station *station,
  */
 static int send_tx_info_frame_nl(struct wmediumd *ctx, struct frame *frame)
 {
-	struct nl_sock *sock = ctx->sock;
+	struct nl_sock *sock = nl_listen_socket;//ctx->sock;
 	struct nl_msg *msg;
 	int ret;
 
@@ -495,7 +525,7 @@ int send_cloned_frame_msg(struct wmediumd *ctx, struct station *dst,
 			  u8 *data, int data_len, int rate_idx, int signal, struct frame *frame)
 {
 	struct nl_msg *msg;
-	struct nl_sock *sock = ctx->sock;
+	struct nl_sock *sock = nl_listen_socket;//ctx->sock;
 	int ret;
 
 	msg = nlmsg_alloc();
@@ -591,6 +621,8 @@ void deliver_frame(struct wmediumd *ctx, struct frame *frame)
 					frame->data_len, frame->sender,
 					station);
 
+				w_logf(ctx, LOG_INFO, "%d\t%lf\t%d\n", rate_idx, (double)snr, frame->sender->index);
+
 				if (drand48() <= error_prob) {
 					w_logf(ctx, LOG_INFO, "Dropped mcast from "
 						   MAC_FMT " to " MAC_FMT " at receiver\n",
@@ -634,6 +666,7 @@ void deliver_expired_frames_queue(struct wmediumd *ctx,
 		if (timespec_before(&frame->expires, now)) {
 			list_del(&frame->list);
 			deliver_frame(ctx, frame);
+			if (ctx->min_expires_set) ctx->min_expires_set = false;
 		} else {
 			break;
 		}
@@ -644,12 +677,12 @@ void deliver_expired_frames(struct wmediumd *ctx)
 {
 	struct timespec now, _diff;
 	struct station *station;
-	struct list_head *l;
+	//struct list_head *l;
 	int i, j, duration;
 
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	list_for_each_entry(station, &ctx->stations, list) {
-		int q_ct[IEEE80211_NUM_ACS] = {};
+		/*int q_ct[IEEE80211_NUM_ACS] = {};
 		for (i = 0; i < IEEE80211_NUM_ACS; i++) {
 			list_for_each(l, &station->queues[i].frames) {
 				q_ct[i]++;
@@ -659,7 +692,7 @@ void deliver_expired_frames(struct wmediumd *ctx)
 					   " BK %d BE %d VI %d VO %d\n",
 			   TIME_ARGS(&now), MAC_ARGS(station->addr),
 			   q_ct[IEEE80211_AC_BK], q_ct[IEEE80211_AC_BE],
-			   q_ct[IEEE80211_AC_VI], q_ct[IEEE80211_AC_VO]);
+			   q_ct[IEEE80211_AC_VI], q_ct[IEEE80211_AC_VO]);*/
 
 		for (i = 0; i < IEEE80211_NUM_ACS; i++)
 			deliver_expired_frames_queue(ctx, &station->queues[i].frames, &now);
@@ -701,13 +734,11 @@ int nl_err_cb(struct sockaddr_nl *nla, struct nlmsgerr *nlerr, void *arg)
 	return NL_SKIP;
 }
 
-/*
- * Handle events from the kernel.  Process CMD_FRAME events and queue them
- * for later delivery with the scheduler.
- */
-static int process_messages_cb(struct nl_msg *msg, void *arg)
-{
-	struct wmediumd *ctx = arg;
+
+void threaded_process_messages_cb(void *args) {
+	struct wmediumd *ctx = ((struct thpool_arg*)args)->ctx;
+	struct nl_msg *msg = ((struct thpool_arg*)args)->msg;
+	free(args);
 	struct nlattr *attrs[HWSIM_ATTR_MAX+1];
 	/* netlink header */
 	struct nlmsghdr *nlh = nlmsg_hdr(msg);
@@ -719,10 +750,13 @@ static int process_messages_cb(struct nl_msg *msg, void *arg)
 	struct ieee80211_hdr *hdr;
 	u8 *src;
 
+	struct timespec now;
+	clock_gettime(CLOCK_REALTIME, &now);
 	if (gnlh->cmd == HWSIM_CMD_FRAME) {
-		pthread_rwlock_rdlock(&snr_lock);
+		//pthread_rwlock_rdlock(&snr_lock);
 		/* we get the attributes*/
 		genlmsg_parse(nlh, 0, attrs, HWSIM_ATTR_MAX, NULL);
+
 		if (attrs[HWSIM_ATTR_ADDR_TRANSMITTER]) {
 			u8 *hwaddr = (u8 *)nla_data(attrs[HWSIM_ATTR_ADDR_TRANSMITTER]);
 
@@ -737,7 +771,7 @@ static int process_messages_cb(struct nl_msg *msg, void *arg)
 				(struct hwsim_tx_rate *)
 				nla_data(attrs[HWSIM_ATTR_TX_INFO]);
 
-		 	unsigned int tx_rates_flags_len =
+			unsigned int tx_rates_flags_len =
 				nla_len(attrs[HWSIM_ATTR_TX_INFO_FLAGS]);
 			struct hwsim_tx_rate_flag *tx_rates_flag =
 				(struct hwsim_tx_rate_flag *)
@@ -755,18 +789,18 @@ static int process_messages_cb(struct nl_msg *msg, void *arg)
 			src = hdr->addr2;
 
 			if (data_len < 6 + 6 + 4)
-				goto out;
+				return;
 
 			sender = get_station_by_addr(ctx, src);
 			if (!sender) {
 				w_flogf(ctx, LOG_ERR, stderr, "Unable to find sender station " MAC_FMT "\n", MAC_ARGS(src));
-				goto out;
+				return;
 			}
 			memcpy(sender->hwaddr, hwaddr, ETH_ALEN);
 
 			frame = malloc(sizeof(*frame) + data_len);
 			if (!frame)
-				goto out;
+				return;
 
 			memcpy(frame->data, data, data_len);
 			frame->data_len = data_len;
@@ -778,25 +812,133 @@ static int process_messages_cb(struct nl_msg *msg, void *arg)
 			frame->tx_rates_count =
 				tx_rates_len / sizeof(struct hwsim_tx_rate);
 			memcpy(frame->tx_rates, tx_rates,
-			       min(tx_rates_len, sizeof(frame->tx_rates)));
+						 min(tx_rates_len, sizeof(frame->tx_rates)));
 			frame->tx_rates_flag_count =
- 				tx_rates_flags_len / sizeof(struct hwsim_tx_rate_flag);
+				tx_rates_flags_len / sizeof(struct hwsim_tx_rate_flag);
 			memcpy(frame->tx_rates_flag, tx_rates_flag,
 						 min(tx_rates_flags_len, sizeof(frame->tx_rates_flag)));
 
 
-			struct timespec now;
 			clock_gettime(CLOCK_REALTIME, &now);
 			w_logf(ctx, LOG_INFO, "process_messages_cb\t%lld\t%x:%x:%x:%x:%x:%x\t%lld%06ld\n", frame->cookie, frame->sender->hwaddr[0], frame->sender->hwaddr[1], frame->sender->hwaddr[2], frame->sender->hwaddr[3], frame->sender->hwaddr[4], frame->sender->hwaddr[5], now.tv_sec, now.tv_nsec/1000);
 			//w_logf(ctx, LOG_INFO, "%x:%x:%x:%x:%x:%x\n", frame->sender->hwaddr[0], frame->sender->hwaddr[1], frame->sender->hwaddr[2], frame->sender->hwaddr[3], frame->sender->hwaddr[4], frame->sender->hwaddr[5]);
 			queue_frame(ctx, sender, frame);
+			clock_gettime(CLOCK_REALTIME, &now);
+			w_logf(ctx, LOG_INFO, "process_messages_cb_e\t%lld\t%x:%x:%x:%x:%x:%x\t%lld%06ld\n", frame->cookie, frame->sender->hwaddr[0], frame->sender->hwaddr[1], frame->sender->hwaddr[2], frame->sender->hwaddr[3], frame->sender->hwaddr[4], frame->sender->hwaddr[5], now.tv_sec, now.tv_nsec/1000);
 			send_tx_info_frame_nl(ctx, frame);
 		}
-out:
-		pthread_rwlock_unlock(&snr_lock);
-		return 0;
-
+		//pthread_rwlock_unlock(&snr_lock);
 	}
+}
+
+/*
+ * Handle events from the kernel.  Process CMD_FRAME events and queue them
+ * for later delivery with the scheduler.
+ */
+static int process_messages_cb(struct nl_msg *msg, void *arg)
+{
+	struct wmediumd *ctx = arg;
+	struct thpool_arg *thpool_arg_data_ptr = malloc(sizeof(thpool_arg_data));
+	thpool_arg_data_ptr->ctx = ctx;
+	thpool_arg_data_ptr->msg = msg;
+	/* init threadpool */
+	//if (!ctx->thpool) ctx->thpool = thpool_init(1);
+	thpool_add_work(ctx->thpool, (void *)threaded_process_messages_cb, thpool_arg_data_ptr);
+	return 0;
+// 	struct nlattr *attrs[HWSIM_ATTR_MAX+1];
+// 	/* netlink header */
+// 	struct nlmsghdr *nlh = nlmsg_hdr(msg);
+// 	/* generic netlink header*/
+// 	struct genlmsghdr *gnlh = nlmsg_data(nlh);
+//
+// 	struct station *sender;
+// 	struct frame *frame;
+// 	struct ieee80211_hdr *hdr;
+// 	u8 *src;
+//
+// 	struct timespec now;
+// 	clock_gettime(CLOCK_REALTIME, &now);
+// 	w_logf(ctx, LOG_INFO, "process_messages_cb_i\t%lld%06ld\n", now.tv_sec, now.tv_nsec/1000);
+//
+// 	if (gnlh->cmd == HWSIM_CMD_FRAME) {
+// 		//pthread_rwlock_rdlock(&snr_lock);
+// 		/* we get the attributes*/
+// 		genlmsg_parse(nlh, 0, attrs, HWSIM_ATTR_MAX, NULL);
+// 		if (attrs[HWSIM_ATTR_ADDR_TRANSMITTER]) {
+// 			u8 *hwaddr = (u8 *)nla_data(attrs[HWSIM_ATTR_ADDR_TRANSMITTER]);
+//
+// 			unsigned int data_len =
+// 				nla_len(attrs[HWSIM_ATTR_FRAME]);
+// 			char *data = (char *)nla_data(attrs[HWSIM_ATTR_FRAME]);
+// 			unsigned int flags =
+// 				nla_get_u32(attrs[HWSIM_ATTR_FLAGS]);
+// 			unsigned int tx_rates_len =
+// 				nla_len(attrs[HWSIM_ATTR_TX_INFO]);
+// 			struct hwsim_tx_rate *tx_rates =
+// 				(struct hwsim_tx_rate *)
+// 				nla_data(attrs[HWSIM_ATTR_TX_INFO]);
+//
+// 		 	unsigned int tx_rates_flags_len =
+// 				nla_len(attrs[HWSIM_ATTR_TX_INFO_FLAGS]);
+// 			struct hwsim_tx_rate_flag *tx_rates_flag =
+// 				(struct hwsim_tx_rate_flag *)
+// 				nla_data(attrs[HWSIM_ATTR_TX_INFO_FLAGS]);
+//
+// 			u64 cookie = nla_get_u64(attrs[HWSIM_ATTR_COOKIE]);
+// 			u32 freq;
+// 			freq = attrs[HWSIM_ATTR_FREQ] ?
+// 					nla_get_u32(attrs[HWSIM_ATTR_FREQ]) : 2412;
+// 			//struct timespec now;
+// 			//clock_gettime(CLOCK_REALTIME, &now);
+// 			//w_logf(ctx, LOG_INFO, "%lld.%.9ld\t%lld\tprocess_messages_cb\n", now.tv_sec, now.tv_nsec, cookie);
+//
+// 			hdr = (struct ieee80211_hdr *)data;
+// 			src = hdr->addr2;
+//
+// 			if (data_len < 6 + 6 + 4)
+// 				goto out;
+//
+// 			sender = get_station_by_addr(ctx, src);
+// 			if (!sender) {
+// 				w_flogf(ctx, LOG_ERR, stderr, "Unable to find sender station " MAC_FMT "\n", MAC_ARGS(src));
+// 				goto out;
+// 			}
+// 			memcpy(sender->hwaddr, hwaddr, ETH_ALEN);
+//
+// 			frame = malloc(sizeof(*frame) + data_len);
+// 			if (!frame)
+// 				goto out;
+//
+// 			memcpy(frame->data, data, data_len);
+// 			frame->data_len = data_len;
+// 			frame->flags = flags;
+// 			frame->cookie = cookie;
+// 			frame->freq = freq;
+// 			frame->sender = sender;
+// 			sender->freq = freq;
+// 			frame->tx_rates_count =
+// 				tx_rates_len / sizeof(struct hwsim_tx_rate);
+// 			memcpy(frame->tx_rates, tx_rates,
+// 			       min(tx_rates_len, sizeof(frame->tx_rates)));
+// 			frame->tx_rates_flag_count =
+//  				tx_rates_flags_len / sizeof(struct hwsim_tx_rate_flag);
+// 			memcpy(frame->tx_rates_flag, tx_rates_flag,
+// 						 min(tx_rates_flags_len, sizeof(frame->tx_rates_flag)));
+//
+//
+// 			clock_gettime(CLOCK_REALTIME, &now);
+// 			w_logf(ctx, LOG_INFO, "process_messages_cb\t%lld\t%x:%x:%x:%x:%x:%x\t%lld%06ld\n", frame->cookie, frame->sender->hwaddr[0], frame->sender->hwaddr[1], frame->sender->hwaddr[2], frame->sender->hwaddr[3], frame->sender->hwaddr[4], frame->sender->hwaddr[5], now.tv_sec, now.tv_nsec/1000);
+// 			//w_logf(ctx, LOG_INFO, "%x:%x:%x:%x:%x:%x\n", frame->sender->hwaddr[0], frame->sender->hwaddr[1], frame->sender->hwaddr[2], frame->sender->hwaddr[3], frame->sender->hwaddr[4], frame->sender->hwaddr[5]);
+// 			queue_frame(ctx, sender, frame);
+// 			clock_gettime(CLOCK_REALTIME, &now);
+// 			w_logf(ctx, LOG_INFO, "process_messages_cb_e\t%lld\t%x:%x:%x:%x:%x:%x\t%lld%06ld\n", frame->cookie, frame->sender->hwaddr[0], frame->sender->hwaddr[1], frame->sender->hwaddr[2], frame->sender->hwaddr[3], frame->sender->hwaddr[4], frame->sender->hwaddr[5], now.tv_sec, now.tv_nsec/1000);
+// 			send_tx_info_frame_nl(ctx, frame);
+// 		}
+// out:
+// 		//pthread_rwlock_unlock(&snr_lock);
+// 		return 0;
+//
+// 	}
 	return 0;
 }
 
@@ -805,7 +947,7 @@ out:
  */
 int send_register_msg(struct wmediumd *ctx)
 {
-	struct nl_sock *sock = ctx->sock;
+	struct nl_sock *sock = nl_listen_socket;//ctx->sock;
 	struct nl_msg *msg;
 	int ret;
 
@@ -838,9 +980,9 @@ out:
 
 static void sock_event_cb(int fd, short what, void *data)
 {
-	struct wmediumd *ctx = data;
+	//struct wmediumd *ctx = data;
 
-	nl_recvmsgs_default(ctx->sock);
+	nl_recvmsgs_default(nl_listen_socket);//ctx->sock);
 }
 
 /*
@@ -863,7 +1005,9 @@ static int init_netlink(struct wmediumd *ctx)
 		return -1;
 	}
 
-	ctx->sock = sock;
+	//ctx->sock = sock;
+	nl_listen_socket = sock;
+	nl_listen_socket_fd = nl_socket_get_fd(sock);
 
 	ret = genl_connect(sock);
 	if (ret < 0) {
@@ -876,6 +1020,8 @@ static int init_netlink(struct wmediumd *ctx)
 		w_logf(ctx, LOG_ERR, "Family MAC80211_HWSIM not registered\n");
 		return -1;
 	}
+
+	ctx->min_expires_set = false;
 
 	nl_cb_set(ctx->cb, NL_CB_MSG_IN, NL_CB_CUSTOM, process_messages_cb, ctx);
 	nl_cb_err(ctx->cb, NL_CB_CUSTOM, nl_err_cb, ctx);
@@ -918,6 +1064,52 @@ static void timer_cb(int fd, short what, void *data)
 	deliver_expired_frames(ctx);
 	rearm_timer(ctx);
 	pthread_rwlock_unlock(&snr_lock);
+}
+
+
+//void main_loop_thread(void *args, bool start_server) {
+void main_loop_thread(void *args) {
+	struct wmediumd *ctx = args;
+	struct event ev_cmd;
+	struct event ev_timer;
+	bool start_server = true;
+
+	/* init libevent */
+	event_init();
+
+	/* init netlink */
+	if (init_netlink(ctx) < 0)
+		return;
+	//nl_listen_socket = nl_socket_get_fd(ctx->sock);
+	//event_set(&ev_cmd, nl_socket_get_fd(ctx->sock), EV_READ | EV_PERSIST,
+	event_set(&ev_cmd, nl_listen_socket_fd, EV_READ | EV_PERSIST,
+		  sock_event_cb, ctx);
+	event_add(&ev_cmd, NULL);
+
+	/* setup timers */
+	//ctx->timerfd = timerfd_create(CLOCK_MONOTONIC, 0);
+	timer_fd = timerfd_create(CLOCK_MONOTONIC, 0);
+	clock_gettime(CLOCK_MONOTONIC, &(ctx->intf_updated));
+	clock_gettime(CLOCK_MONOTONIC, &(ctx->next_move));
+	ctx->next_move.tv_sec += MOVE_INTERVAL;
+	//event_set(&ev_timer, ctx->timerfd, EV_READ | EV_PERSIST, timer_cb, ctx);
+	event_set(&ev_timer, timer_fd, EV_READ | EV_PERSIST, timer_cb, ctx);
+	event_add(&ev_timer, NULL);
+
+	/* register for new frames */
+	if (send_register_msg(ctx) == 0) {
+		w_logf(ctx, LOG_NOTICE, "REGISTER SENT!\n");
+	}
+
+	if (start_server == true)
+		thpool_add_work(ctx->thpool, (void*)run_wserver, &ctx);
+		//start_wserver(ctx);
+
+	/* enter libevent main loop */
+	event_dispatch();
+
+	if (start_server == true)
+		stop_wserver();
 }
 
 int main(int argc, char *argv[])
@@ -1016,6 +1208,14 @@ int main(int argc, char *argv[])
 	if (load_config(&ctx, config_file, per_file, full_dynamic))
 		return EXIT_FAILURE;
 
+	ctx.thpool = thpool_init(2);
+
+	thpool_add_work(ctx.thpool, (void *)main_loop_thread, &ctx);
+	thpool_wait(ctx.thpool);
+	//main_loop_thread(&ctx, start_server);
+
+	goto out;
+
 	/* init libevent */
 	event_init();
 
@@ -1023,16 +1223,16 @@ int main(int argc, char *argv[])
 	if (init_netlink(&ctx) < 0)
 		return EXIT_FAILURE;
 
-	event_set(&ev_cmd, nl_socket_get_fd(ctx.sock), EV_READ | EV_PERSIST,
-		  sock_event_cb, &ctx);
+	//event_set(&ev_cmd, nl_socket_get_fd(ctx.sock), EV_READ | EV_PERSIST,
+		  //sock_event_cb, &ctx);
 	event_add(&ev_cmd, NULL);
 
 	/* setup timers */
-	ctx.timerfd = timerfd_create(CLOCK_MONOTONIC, 0);
+	//ctx.timerfd = timerfd_create(CLOCK_MONOTONIC, 0);
 	clock_gettime(CLOCK_MONOTONIC, &ctx.intf_updated);
 	clock_gettime(CLOCK_MONOTONIC, &ctx.next_move);
 	ctx.next_move.tv_sec += MOVE_INTERVAL;
-	event_set(&ev_timer, ctx.timerfd, EV_READ | EV_PERSIST, timer_cb, &ctx);
+	//event_set(&ev_timer, ctx.timerfd, EV_READ | EV_PERSIST, timer_cb, &ctx);
 	event_add(&ev_timer, NULL);
 
 	/* register for new frames */
@@ -1049,7 +1249,10 @@ int main(int argc, char *argv[])
 	if (start_server == true)
 		stop_wserver();
 
-	free(ctx.sock);
+	out:
+
+	//free(ctx.sock);
+	free(nl_listen_socket);
 	free(ctx.cb);
 	free(ctx.intf);
 	free(ctx.per_matrix);

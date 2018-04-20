@@ -160,9 +160,14 @@ enum hwsim_tx_rate_flags {
 #include <stdbool.h>
 #include <syslog.h>
 #include <stdio.h>
+#include <netlink/netlink.h>
+#include <netlink/genl/genl.h>
+#include <netlink/genl/ctrl.h>
+#include <netlink/genl/family.h>
 
 #include "list.h"
 #include "ieee80211.h"
+#include "thpool.h"
 
 typedef uint8_t u8;
 typedef uint32_t u32;
@@ -223,9 +228,9 @@ struct station {
 };
 
 struct wmediumd {
-	int timerfd;
+	//int timerfd;
 
-	struct nl_sock *sock;
+	//struct nl_sock *sock;
 
 	int num_stas;
 	struct list_head stations;
@@ -244,6 +249,7 @@ struct wmediumd {
 	int fading_coefficient;
 	int noise_threshold;
 
+
 	struct nl_cb *cb;
 	int family_id;
 
@@ -257,7 +263,19 @@ struct wmediumd {
 	int (*get_fading_signal)(struct wmediumd *);
 
 	u8 log_lvl;
+
+	//testing
+	struct timespec min_expires;	/* frame delivery (absolute) */
+	bool min_expires_set;
+	threadpool thpool;
+
+	//struct nl_msg *msg;
 };
+
+typedef struct thpool_arg {
+	void *ctx;
+	struct nl_msg* msg;
+} thpool_arg_data, *thpool_arg_data_ptr;
 
 struct hwsim_tx_rate {
 	signed char idx;

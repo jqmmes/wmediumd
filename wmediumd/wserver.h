@@ -35,6 +35,7 @@ struct request_ctx {
  * @return 0 on success
  */
 int start_wserver(struct wmediumd *ctx);
+void *run_wserver(struct wmediumd *ctx);
 
 /**
  * Stop the server if active
