@@ -705,6 +705,7 @@ void *run_wserver(void *ctx) {
 
     evutil_make_socket_nonblocking(listen_soc);
     server_event_base = event_base_new();
+    printf("wserver listen_soc_fd: %d", listen_soc);
     accept_event = event_new(server_event_base, listen_soc, EV_READ | EV_PERSIST, on_listen_event, ctx);
     event_add(accept_event, NULL);
 

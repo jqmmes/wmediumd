@@ -735,7 +735,7 @@ int nl_err_cb(struct sockaddr_nl *nla, struct nlmsgerr *nlerr, void *arg)
 }
 
 
-void threaded_process_messages_cb(void *args) {
+static void threaded_process_messages_cb(void *args) {
 	struct wmediumd *ctx = ((struct thpool_arg*)args)->ctx;
 	struct nl_msg *msg = ((struct thpool_arg*)args)->msg;
 	free(args);
@@ -837,6 +837,7 @@ void threaded_process_messages_cb(void *args) {
  */
 static int process_messages_cb(struct nl_msg *msg, void *arg)
 {
+	printf("process_messages_cb\n");
 	struct wmediumd *ctx = arg;
 	struct thpool_arg *thpool_arg_data_ptr = malloc(sizeof(thpool_arg_data));
 	thpool_arg_data_ptr->ctx = ctx;
@@ -950,6 +951,7 @@ int send_register_msg(struct wmediumd *ctx)
 	struct nl_sock *sock = nl_listen_socket;//ctx->sock;
 	struct nl_msg *msg;
 	int ret;
+	printf("send_register_msg %p\n", sock);
 
 	msg = nlmsg_alloc();
 	if (!msg) {
@@ -966,6 +968,7 @@ int send_register_msg(struct wmediumd *ctx)
 	}
 
 	ret = nl_send_auto_complete(sock, msg);
+	printf("send_register_msg %d\n", ret);
 	if (ret < 0) {
 		w_logf(ctx, LOG_ERR, "%s: nl_send_auto failed\n", __func__);
 		ret = -1;
@@ -981,6 +984,7 @@ out:
 static void sock_event_cb(int fd, short what, void *data)
 {
 	//struct wmediumd *ctx = data;
+	printf("sock_event_cb\n");
 
 	nl_recvmsgs_default(nl_listen_socket);//ctx->sock);
 }
@@ -1007,7 +1011,9 @@ static int init_netlink(struct wmediumd *ctx)
 
 	//ctx->sock = sock;
 	nl_listen_socket = sock;
-	nl_listen_socket_fd = nl_socket_get_fd(sock);
+	printf("nl_listen_socket: %p\n", sock);
+	printf("nl_listen_socket_fd: %d\n", nl_socket_get_fd(sock));
+	//nl_listen_socket_fd = nl_socket_get_fd(sock);
 
 	ret = genl_connect(sock);
 	if (ret < 0) {
@@ -1082,9 +1088,12 @@ void main_loop_thread(void *args) {
 		return;
 	//nl_listen_socket = nl_socket_get_fd(ctx->sock);
 	//event_set(&ev_cmd, nl_socket_get_fd(ctx->sock), EV_READ | EV_PERSIST,
-	event_set(&ev_cmd, nl_listen_socket_fd, EV_READ | EV_PERSIST,
-		  sock_event_cb, ctx);
-	event_add(&ev_cmd, NULL);
+	//nl_socket_get_fd(nl_listen_socket);
+	//event_set(&ev_cmd, nl_socket_get_fd(nl_listen_socket), EV_READ | EV_PERSIST,
+	//	  sock_event_cb, ctx);
+	//event_add(&ev_cmd, NULL);
+	//printf("%p", nl_listen_socket);
+	printf("nl_listen_socket_fd: %d", nl_socket_get_fd(nl_listen_socket));
 
 	/* setup timers */
 	//ctx->timerfd = timerfd_create(CLOCK_MONOTONIC, 0);
@@ -1093,8 +1102,8 @@ void main_loop_thread(void *args) {
 	clock_gettime(CLOCK_MONOTONIC, &(ctx->next_move));
 	ctx->next_move.tv_sec += MOVE_INTERVAL;
 	//event_set(&ev_timer, ctx->timerfd, EV_READ | EV_PERSIST, timer_cb, ctx);
-	event_set(&ev_timer, timer_fd, EV_READ | EV_PERSIST, timer_cb, ctx);
-	event_add(&ev_timer, NULL);
+	//event_set(&ev_timer, timer_fd, EV_READ | EV_PERSIST, timer_cb, ctx);
+	//event_add(&ev_timer, NULL);
 
 	/* register for new frames */
 	if (send_register_msg(ctx) == 0) {
@@ -1102,7 +1111,7 @@ void main_loop_thread(void *args) {
 	}
 
 	if (start_server == true)
-		thpool_add_work(ctx->thpool, (void*)run_wserver, &ctx);
+		thpool_add_work(ctx->thpool, (void*)run_wserver, ctx);
 		//start_wserver(ctx);
 
 	/* enter libevent main loop */
@@ -1208,7 +1217,7 @@ int main(int argc, char *argv[])
 	if (load_config(&ctx, config_file, per_file, full_dynamic))
 		return EXIT_FAILURE;
 
-	ctx.thpool = thpool_init(2);
+	ctx.thpool = thpool_init(6);
 
 	thpool_add_work(ctx.thpool, (void *)main_loop_thread, &ctx);
 	thpool_wait(ctx.thpool);
@@ -1224,7 +1233,7 @@ int main(int argc, char *argv[])
 		return EXIT_FAILURE;
 
 	//event_set(&ev_cmd, nl_socket_get_fd(ctx.sock), EV_READ | EV_PERSIST,
-		  //sock_event_cb, &ctx);
+	//	  sock_event_cb, &ctx);
 	event_add(&ev_cmd, NULL);
 
 	/* setup timers */
@@ -1233,7 +1242,7 @@ int main(int argc, char *argv[])
 	clock_gettime(CLOCK_MONOTONIC, &ctx.next_move);
 	ctx.next_move.tv_sec += MOVE_INTERVAL;
 	//event_set(&ev_timer, ctx.timerfd, EV_READ | EV_PERSIST, timer_cb, &ctx);
-	event_add(&ev_timer, NULL);
+	//event_add(&ev_timer, NULL);
 
 	/* register for new frames */
 	if (send_register_msg(&ctx) == 0) {
