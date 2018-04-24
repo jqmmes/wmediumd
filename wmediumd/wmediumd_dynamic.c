@@ -42,7 +42,9 @@ int add_station(struct wmediumd *ctx, const u8 addr[]) {
             return -EEXIST;
     }
 
+    printf("pthread_rwlock_wrlock: add_station\n");
     pthread_rwlock_wrlock(&snr_lock);
+    printf("pthread_rwlock_wrlock: add_station\tLOCKED\n");
     size_t oldnum = (size_t) ctx->num_stas;
     size_t newnum = oldnum + 1;
 
@@ -126,6 +128,7 @@ int add_station(struct wmediumd *ctx, const u8 addr[]) {
     ret = station->index;
 
     out:
+    printf("pthread_rwlock_unlock: add_station\n");
     pthread_rwlock_unlock(&snr_lock);
     return ret;
 }

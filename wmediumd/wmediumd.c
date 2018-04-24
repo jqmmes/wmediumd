@@ -46,8 +46,14 @@
 
 
 static struct nl_sock *nl_listen_socket;
-static int nl_listen_socket_fd;
 static int timer_fd;
+static struct event *ev_cmd;
+static struct event *ev_timer;
+static struct event_base *cmd_event_base;
+static struct event_base *timer_event_base;
+static struct event *accept_event;
+static int listen_soc;
+static struct event_base *server_event_base;
 
 static inline int div_round(int a, int b)
 {
@@ -842,104 +848,8 @@ static int process_messages_cb(struct nl_msg *msg, void *arg)
 	struct thpool_arg *thpool_arg_data_ptr = malloc(sizeof(thpool_arg_data));
 	thpool_arg_data_ptr->ctx = ctx;
 	thpool_arg_data_ptr->msg = msg;
-	/* init threadpool */
-	//if (!ctx->thpool) ctx->thpool = thpool_init(1);
 	thpool_add_work(ctx->thpool, (void *)threaded_process_messages_cb, thpool_arg_data_ptr);
 	return 0;
-// 	struct nlattr *attrs[HWSIM_ATTR_MAX+1];
-// 	/* netlink header */
-// 	struct nlmsghdr *nlh = nlmsg_hdr(msg);
-// 	/* generic netlink header*/
-// 	struct genlmsghdr *gnlh = nlmsg_data(nlh);
-//
-// 	struct station *sender;
-// 	struct frame *frame;
-// 	struct ieee80211_hdr *hdr;
-// 	u8 *src;
-//
-// 	struct timespec now;
-// 	clock_gettime(CLOCK_REALTIME, &now);
-// 	w_logf(ctx, LOG_INFO, "process_messages_cb_i\t%lld%06ld\n", now.tv_sec, now.tv_nsec/1000);
-//
-// 	if (gnlh->cmd == HWSIM_CMD_FRAME) {
-// 		//pthread_rwlock_rdlock(&snr_lock);
-// 		/* we get the attributes*/
-// 		genlmsg_parse(nlh, 0, attrs, HWSIM_ATTR_MAX, NULL);
-// 		if (attrs[HWSIM_ATTR_ADDR_TRANSMITTER]) {
-// 			u8 *hwaddr = (u8 *)nla_data(attrs[HWSIM_ATTR_ADDR_TRANSMITTER]);
-//
-// 			unsigned int data_len =
-// 				nla_len(attrs[HWSIM_ATTR_FRAME]);
-// 			char *data = (char *)nla_data(attrs[HWSIM_ATTR_FRAME]);
-// 			unsigned int flags =
-// 				nla_get_u32(attrs[HWSIM_ATTR_FLAGS]);
-// 			unsigned int tx_rates_len =
-// 				nla_len(attrs[HWSIM_ATTR_TX_INFO]);
-// 			struct hwsim_tx_rate *tx_rates =
-// 				(struct hwsim_tx_rate *)
-// 				nla_data(attrs[HWSIM_ATTR_TX_INFO]);
-//
-// 		 	unsigned int tx_rates_flags_len =
-// 				nla_len(attrs[HWSIM_ATTR_TX_INFO_FLAGS]);
-// 			struct hwsim_tx_rate_flag *tx_rates_flag =
-// 				(struct hwsim_tx_rate_flag *)
-// 				nla_data(attrs[HWSIM_ATTR_TX_INFO_FLAGS]);
-//
-// 			u64 cookie = nla_get_u64(attrs[HWSIM_ATTR_COOKIE]);
-// 			u32 freq;
-// 			freq = attrs[HWSIM_ATTR_FREQ] ?
-// 					nla_get_u32(attrs[HWSIM_ATTR_FREQ]) : 2412;
-// 			//struct timespec now;
-// 			//clock_gettime(CLOCK_REALTIME, &now);
-// 			//w_logf(ctx, LOG_INFO, "%lld.%.9ld\t%lld\tprocess_messages_cb\n", now.tv_sec, now.tv_nsec, cookie);
-//
-// 			hdr = (struct ieee80211_hdr *)data;
-// 			src = hdr->addr2;
-//
-// 			if (data_len < 6 + 6 + 4)
-// 				goto out;
-//
-// 			sender = get_station_by_addr(ctx, src);
-// 			if (!sender) {
-// 				w_flogf(ctx, LOG_ERR, stderr, "Unable to find sender station " MAC_FMT "\n", MAC_ARGS(src));
-// 				goto out;
-// 			}
-// 			memcpy(sender->hwaddr, hwaddr, ETH_ALEN);
-//
-// 			frame = malloc(sizeof(*frame) + data_len);
-// 			if (!frame)
-// 				goto out;
-//
-// 			memcpy(frame->data, data, data_len);
-// 			frame->data_len = data_len;
-// 			frame->flags = flags;
-// 			frame->cookie = cookie;
-// 			frame->freq = freq;
-// 			frame->sender = sender;
-// 			sender->freq = freq;
-// 			frame->tx_rates_count =
-// 				tx_rates_len / sizeof(struct hwsim_tx_rate);
-// 			memcpy(frame->tx_rates, tx_rates,
-// 			       min(tx_rates_len, sizeof(frame->tx_rates)));
-// 			frame->tx_rates_flag_count =
-//  				tx_rates_flags_len / sizeof(struct hwsim_tx_rate_flag);
-// 			memcpy(frame->tx_rates_flag, tx_rates_flag,
-// 						 min(tx_rates_flags_len, sizeof(frame->tx_rates_flag)));
-//
-//
-// 			clock_gettime(CLOCK_REALTIME, &now);
-// 			w_logf(ctx, LOG_INFO, "process_messages_cb\t%lld\t%x:%x:%x:%x:%x:%x\t%lld%06ld\n", frame->cookie, frame->sender->hwaddr[0], frame->sender->hwaddr[1], frame->sender->hwaddr[2], frame->sender->hwaddr[3], frame->sender->hwaddr[4], frame->sender->hwaddr[5], now.tv_sec, now.tv_nsec/1000);
-// 			//w_logf(ctx, LOG_INFO, "%x:%x:%x:%x:%x:%x\n", frame->sender->hwaddr[0], frame->sender->hwaddr[1], frame->sender->hwaddr[2], frame->sender->hwaddr[3], frame->sender->hwaddr[4], frame->sender->hwaddr[5]);
-// 			queue_frame(ctx, sender, frame);
-// 			clock_gettime(CLOCK_REALTIME, &now);
-// 			w_logf(ctx, LOG_INFO, "process_messages_cb_e\t%lld\t%x:%x:%x:%x:%x:%x\t%lld%06ld\n", frame->cookie, frame->sender->hwaddr[0], frame->sender->hwaddr[1], frame->sender->hwaddr[2], frame->sender->hwaddr[3], frame->sender->hwaddr[4], frame->sender->hwaddr[5], now.tv_sec, now.tv_nsec/1000);
-// 			send_tx_info_frame_nl(ctx, frame);
-// 		}
-// out:
-// 		//pthread_rwlock_unlock(&snr_lock);
-// 		return 0;
-//
-// 	}
 	return 0;
 }
 
@@ -1011,9 +921,6 @@ static int init_netlink(struct wmediumd *ctx)
 
 	//ctx->sock = sock;
 	nl_listen_socket = sock;
-	printf("nl_listen_socket: %p\n", sock);
-	printf("nl_listen_socket_fd: %d\n", nl_socket_get_fd(sock));
-	//nl_listen_socket_fd = nl_socket_get_fd(sock);
 
 	ret = genl_connect(sock);
 	if (ret < 0) {
@@ -1072,12 +979,36 @@ static void timer_cb(int fd, short what, void *data)
 	pthread_rwlock_unlock(&snr_lock);
 }
 
+static void on_listen_event(int fd, short what, void *wctx) {
+    printf("on_listen_event\n" );
+    UNUSED(fd);
+    UNUSED(what);
+    struct accept_context *actx = malloc(sizeof(struct accept_context));
+    if (!actx) {
+        //w_logf(wctx, LOG_ERR, "Error during allocation of memory in on_listen_event wmediumd/wserver.c\n");
+        return;
+    }
+    actx->wctx = wctx;
+    actx->server_socket = fd;
+    actx->thread = malloc(sizeof(pthread_t));
+    if (!actx->thread) {
+        //w_logf(wctx, LOG_ERR, "Error during allocation of memory in on_listen_event wmediumd/wserver.c\n");
+        free(actx);
+        return;
+    }
+    actx->client_socket = accept_connection(actx->server_socket);
+    if (actx->client_socket < 0) {
+        //w_logf(actx->wctx, LOG_ERR, LOG_PREFIX "Accept failed: %s\n", strerror(errno));
+    } else {
+      //thpool_add_work(((struct wmediumd*)wctx)->thpool, (void*)handle_accepted_connection, actx);
+      pthread_create(actx->thread, NULL, handle_accepted_connection, actx);
+    }
+}
+
 
 //void main_loop_thread(void *args, bool start_server) {
 void main_loop_thread(void *args) {
 	struct wmediumd *ctx = args;
-	struct event ev_cmd;
-	struct event ev_timer;
 	bool start_server = true;
 
 	/* init libevent */
@@ -1093,7 +1024,10 @@ void main_loop_thread(void *args) {
 	//	  sock_event_cb, ctx);
 	//event_add(&ev_cmd, NULL);
 	//printf("%p", nl_listen_socket);
-	printf("nl_listen_socket_fd: %d", nl_socket_get_fd(nl_listen_socket));
+	//printf("nl_listen_socket_fd: %d", nl_socket_get_fd(nl_listen_socket));
+	cmd_event_base = event_base_new();
+	ev_cmd = event_new(cmd_event_base, nl_socket_get_fd(nl_listen_socket), EV_READ | EV_PERSIST, sock_event_cb, ctx);
+	event_add(ev_cmd, NULL);
 
 	/* setup timers */
 	//ctx->timerfd = timerfd_create(CLOCK_MONOTONIC, 0);
@@ -1104,16 +1038,30 @@ void main_loop_thread(void *args) {
 	//event_set(&ev_timer, ctx->timerfd, EV_READ | EV_PERSIST, timer_cb, ctx);
 	//event_set(&ev_timer, timer_fd, EV_READ | EV_PERSIST, timer_cb, ctx);
 	//event_add(&ev_timer, NULL);
+	timer_event_base = event_base_new();
+	ev_timer = event_new(timer_event_base, timer_fd, EV_READ | EV_PERSIST, timer_cb, ctx);
+	event_add(ev_timer, NULL);
 
 	/* register for new frames */
 	if (send_register_msg(ctx) == 0) {
 		w_logf(ctx, LOG_NOTICE, "REGISTER SENT!\n");
 	}
 
-	if (start_server == true)
-		thpool_add_work(ctx->thpool, (void*)run_wserver, ctx);
-		//start_wserver(ctx);
+	if (start_server == true) {
+		//old_sig_handler = signal(SIGINT, handle_sigint);
 
+		listen_soc = create_listen_socket(ctx);
+		if (listen_soc < 0) {
+				goto dispatch;
+		}
+		evutil_make_socket_nonblocking(listen_soc);
+		server_event_base = event_base_new();
+		printf("wserver listen_soc_fd: %d\n", listen_soc);
+		accept_event = event_new(server_event_base, listen_soc, EV_READ | EV_PERSIST, on_listen_event, ctx);
+		event_add(accept_event, NULL);
+	}
+
+	dispatch:
 	/* enter libevent main loop */
 	event_dispatch();
 
@@ -1124,8 +1072,8 @@ void main_loop_thread(void *args) {
 int main(int argc, char *argv[])
 {
 	int opt;
-	struct event ev_cmd;
-	struct event ev_timer;
+	//struct event ev_cmd;
+	//struct event ev_timer;
 	struct wmediumd ctx;
 	char *config_file = NULL;
 	char *per_file = NULL;
@@ -1226,37 +1174,37 @@ int main(int argc, char *argv[])
 	goto out;
 
 	/* init libevent */
-	event_init();
+	//event_init();
 
 	/* init netlink */
-	if (init_netlink(&ctx) < 0)
-		return EXIT_FAILURE;
+	//if (init_netlink(&ctx) < 0)
+	//		return EXIT_FAILURE;
 
 	//event_set(&ev_cmd, nl_socket_get_fd(ctx.sock), EV_READ | EV_PERSIST,
 	//	  sock_event_cb, &ctx);
-	event_add(&ev_cmd, NULL);
+	//event_add(&ev_cmd, NULL);
 
 	/* setup timers */
 	//ctx.timerfd = timerfd_create(CLOCK_MONOTONIC, 0);
-	clock_gettime(CLOCK_MONOTONIC, &ctx.intf_updated);
-	clock_gettime(CLOCK_MONOTONIC, &ctx.next_move);
-	ctx.next_move.tv_sec += MOVE_INTERVAL;
-	//event_set(&ev_timer, ctx.timerfd, EV_READ | EV_PERSIST, timer_cb, &ctx);
-	//event_add(&ev_timer, NULL);
-
-	/* register for new frames */
-	if (send_register_msg(&ctx) == 0) {
-		w_logf(&ctx, LOG_NOTICE, "REGISTER SENT!\n");
-	}
-
-	if (start_server == true)
-		start_wserver(&ctx);
-
-	/* enter libevent main loop */
-	event_dispatch();
-
-	if (start_server == true)
-		stop_wserver();
+	// clock_gettime(CLOCK_MONOTONIC, &ctx.intf_updated);
+	// clock_gettime(CLOCK_MONOTONIC, &ctx.next_move);
+	// ctx.next_move.tv_sec += MOVE_INTERVAL;
+	// //event_set(&ev_timer, ctx.timerfd, EV_READ | EV_PERSIST, timer_cb, &ctx);
+	// //event_add(&ev_timer, NULL);
+  //
+	// /* register for new frames */
+	// if (send_register_msg(&ctx) == 0) {
+	// 	w_logf(&ctx, LOG_NOTICE, "REGISTER SENT!\n");
+	// }
+  //
+	// if (start_server == true)
+	// 	start_wserver(&ctx);
+  //
+	// /* enter libevent main loop */
+	// event_dispatch();
+  //
+	// if (start_server == true)
+	// 	stop_wserver();
 
 	out:
 

@@ -20,6 +20,7 @@
 
 #include <sys/socket.h>
 #include <memory.h>
+#include <stdio.h>
 #include "wserver_messages.h"
 #include "wserver_messages_network.h"
 
@@ -201,12 +202,18 @@ int recv_station_add_response(int sock, station_add_response *elem) {
 
 int wserver_recv_msg_base(int sock_fd, wserver_msg *base, int *recv_type) {
     int ret = recvfull(sock_fd, base, sizeof(wserver_msg), 0, 0);
+    printf("wserver_recv_msg_base #0\t%d", ret);
     if (ret) {
+        printf("wserver_recv_msg_base #0.1\t%d", ret);
         return ret;
     }
+    printf("wserver_recv_msg_base #1");
     ntoh_base(base);
+    printf("wserver_recv_msg_base #2");
     *recv_type = base->type;
+    printf("wserver_recv_msg_base #3");
     hton_base(base);
+    printf("wserver_recv_msg_base #4");
     return 0;
 }
 

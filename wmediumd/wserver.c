@@ -113,10 +113,14 @@ int create_listen_socket(struct wmediumd *ctx) {
 int accept_connection(int listen_soc) {
     struct sockaddr_in claddr;
     socklen_t claddr_size = sizeof(claddr);
+    printf("accept_connection\n");
     int soc = accept(listen_soc, (struct sockaddr *) &claddr, &claddr_size);
+    printf("accept_connection #1\n");
     if (soc < 0) {
+      printf("accept_connection #2\n");
         return -1;
     }
+    printf("accept_connection #3\n");
     return soc;
 }
 
@@ -129,7 +133,9 @@ int handle_snr_update_request(struct request_ctx *ctx, const snr_update_request 
     	struct station *receiver = NULL;
     	struct station *station;
 
+        printf("pthread_rwlock_wrlock: handle_snr_update_request\n");
         pthread_rwlock_wrlock(&snr_lock);
+        printf("pthread_rwlock_wrlock: handle_snr_update_request\tLOCKED\n");
 
         list_for_each_entry(station, &ctx->ctx->stations, list) {
             if (memcmp(&request->from_addr, station->addr, ETH_ALEN) == 0) {
@@ -152,6 +158,7 @@ int handle_snr_update_request(struct request_ctx *ctx, const snr_update_request 
             ctx->ctx->snr_matrix[receiver->index * ctx->ctx->num_stas + sender->index] = request->snr;
             response.update_result = WUPDATE_SUCCESS;
         }
+        printf("pthread_rwlock_unlock: handle_snr_update_request\n");
         pthread_rwlock_unlock(&snr_lock);
     } else {
         response.update_result = WUPDATE_WRONG_MODE;
@@ -173,7 +180,9 @@ int handle_position_update_request(struct request_ctx *ctx, const position_updat
     	struct station *station;
     	int start, end, path_loss, gains, txpower;
 
+        printf("pthread_rwlock_wrlock: handle_position_update_request\n");
         pthread_rwlock_wrlock(&snr_lock);
+        printf("pthread_rwlock_wrlock: handle_position_update_request\tLOCKED\n");
 
         list_for_each_entry(station, &ctx->ctx->stations, list) {
 			if (memcmp(&request->sta_addr, station->addr, ETH_ALEN) == 0) {
@@ -202,7 +211,7 @@ int handle_position_update_request(struct request_ctx *ctx, const position_updat
 			}
 		}
 		response.update_result = WUPDATE_SUCCESS;
-
+        printf("pthread_rwlock_unlock: handle_position_update_request\n");
         pthread_rwlock_unlock(&snr_lock);
     } else {
         response.update_result = WUPDATE_WRONG_MODE;
@@ -219,8 +228,9 @@ int handle_txpower_update_request(struct request_ctx *ctx, const txpower_update_
     	struct station *sender = NULL;
     	struct station *station;
     	int start, end, path_loss, gains, txpower;
-
+        printf("pthread_rwlock_wrlock: handle_txpower_update_request\n");
         pthread_rwlock_wrlock(&snr_lock);
+        printf("pthread_rwlock_wrlock: handle_txpower_update_request\tLOCKED\n");
 
         list_for_each_entry(station, &ctx->ctx->stations, list) {
 			if (memcmp(&request->sta_addr, station->addr, ETH_ALEN) == 0) {
@@ -247,7 +257,7 @@ int handle_txpower_update_request(struct request_ctx *ctx, const txpower_update_
 			}
 		}
 		response.update_result = WUPDATE_SUCCESS;
-
+        printf("pthread_rwlock_unlock: handle_txpower_update_request\n");
         pthread_rwlock_unlock(&snr_lock);
     } else {
         response.update_result = WUPDATE_WRONG_MODE;
@@ -264,8 +274,9 @@ int handle_gaussian_random_update_request(struct request_ctx *ctx, const gaussia
     	struct station *sender = NULL;
     	struct station *station;
     	int start, end, path_loss, gains, txpower;
-
+        printf("pthread_rwlock_wrlock: handle_gaussian_random_update_request\n");
         pthread_rwlock_wrlock(&snr_lock);
+        printf("pthread_rwlock_wrlock: handle_gaussian_random_update_request\tLOCKED\n");
 
         list_for_each_entry(station, &ctx->ctx->stations, list) {
 			if (memcmp(&request->sta_addr, station->addr, ETH_ALEN) == 0) {
@@ -292,7 +303,7 @@ int handle_gaussian_random_update_request(struct request_ctx *ctx, const gaussia
 			}
 		}
 		response.update_result = WUPDATE_SUCCESS;
-
+        printf("pthread_rwlock_unlock: handle_gaussian_random_update_request\n");
         pthread_rwlock_unlock(&snr_lock);
     } else {
         response.update_result = WUPDATE_WRONG_MODE;
@@ -309,8 +320,9 @@ int handle_gain_update_request(struct request_ctx *ctx, const gain_update_reques
     	struct station *sender = NULL;
     	struct station *station;
     	int start, end, path_loss, gains, txpower;
-
+        printf("pthread_rwlock_wrlock: handle_gain_update_request\n");
         pthread_rwlock_wrlock(&snr_lock);
+        printf("pthread_rwlock_wrlock: handle_gain_update_request\tLOCKED\n");
 
         list_for_each_entry(station, &ctx->ctx->stations, list) {
 			if (memcmp(&request->sta_addr, station->addr, ETH_ALEN) == 0) {
@@ -337,7 +349,7 @@ int handle_gain_update_request(struct request_ctx *ctx, const gain_update_reques
 			}
 		}
 		response.update_result = WUPDATE_SUCCESS;
-
+        printf("pthread_rwlock_unlock: handle_gain_update_request\n");
         pthread_rwlock_unlock(&snr_lock);
     } else {
         response.update_result = WUPDATE_WRONG_MODE;
@@ -546,6 +558,7 @@ int receive_handle_request(struct request_ctx *ctx) {
     wserver_msg base;
     int recv_type;
     int ret = wserver_recv_msg_base(ctx->sock_fd, &base, &recv_type);
+    printf("receive_handle_request\t%d\n", recv_type);
     if (ret > 0) {
         return ret;
     } else if (ret < 0) {
@@ -629,12 +642,6 @@ int receive_handle_request(struct request_ctx *ctx) {
     }
 }
 
-struct accept_context {
-    struct wmediumd *wctx;
-    int server_socket;
-    int client_socket;
-    pthread_t *thread;
-};
 
 void *handle_accepted_connection(void *d_ptr) {
     struct accept_context *actx = d_ptr;
@@ -642,6 +649,7 @@ void *handle_accepted_connection(void *d_ptr) {
     rctx.ctx = actx->wctx;
     rctx.sock_fd = actx->client_socket;
     w_logf(rctx.ctx, LOG_INFO, LOG_PREFIX "Client connected\n");
+    printf("handle_accepted_connection\n");
     while (1) {
         int action_resp;
         w_logf(rctx.ctx, LOG_INFO, LOG_PREFIX "Waiting for request...\n");
@@ -658,12 +666,14 @@ void *handle_accepted_connection(void *d_ptr) {
             break;
         }
     }
+    printf("handle_accepted_connection::out\n");
     close(rctx.sock_fd);
     free(actx);
     return NULL;
 }
 
-void on_listen_event(int fd, short what, void *wctx) {
+/*static void on_listen_event(int fd, short what, void *wctx) {
+    printf("on_listen_event\n" );
     UNUSED(fd);
     UNUSED(what);
     struct accept_context *actx = malloc(sizeof(struct accept_context));
@@ -683,16 +693,17 @@ void on_listen_event(int fd, short what, void *wctx) {
     if (actx->client_socket < 0) {
         w_logf(actx->wctx, LOG_ERR, LOG_PREFIX "Accept failed: %s\n", strerror(errno));
     } else {
-        pthread_create(actx->thread, NULL, handle_accepted_connection, actx);
+      //thpool_add_work(((struct wmediumd*)wctx)->thpool, (void*)handle_accepted_connection, actx);
+      pthread_create(actx->thread, NULL, handle_accepted_connection, actx);
     }
-}
+}*/
 
 /**
  * Run the server using the given wmediumd context
  * @param ctx The wmediumd context
  * @return NULL, required for pthread
  */
-void *run_wserver(void *ctx) {
+/*void *run_wserver(void *ctx) {
     struct event *accept_event;
 
     old_sig_handler = signal(SIGINT, handle_sigint);
@@ -716,11 +727,11 @@ void *run_wserver(void *ctx) {
     event_base_free(server_event_base);
     stop_wserver();
     return NULL;
-}
+}*/
 
-int start_wserver(struct wmediumd *ctx) {
+/*int start_wserver(struct wmediumd *ctx) {
     return pthread_create(&server_thread, NULL, run_wserver, ctx);
-}
+}*/
 
 void stop_wserver() {
     signal(SIGINT, old_sig_handler);

@@ -20,6 +20,7 @@
 
 #include <netinet/in.h>
 #include <errno.h>
+#include <stdio.h>
 #include "wserver_messages_network.h"
 
 
@@ -46,12 +47,15 @@ int recvfull(int sock, void *buf, size_t len, size_t shift, int flags) {
     size_t total = 0;
     size_t bytesleft = len;
     ssize_t currrecv = 0;
+    printf("recvfull\n");
     while (total < len) {
         currrecv = recv(sock, buf + shift + total, bytesleft, flags);
+        printf("recvfull #1\t%ld\t%ld\t%ld\n", total, bytesleft, currrecv);
         if (currrecv == -1) {
             if (errno == EPIPE || errno == ECONNRESET) {
                 return WACTION_DISCONNECTED;
             } else {
+              printf("Error: %d\n", errno);
                 return -errno;
             }
         } else if (currrecv == 0) {
@@ -60,6 +64,7 @@ int recvfull(int sock, void *buf, size_t len, size_t shift, int flags) {
         total += currrecv;
         bytesleft -= currrecv;
     }
+    printf("WACTION_CONTINUE\n");
     return WACTION_CONTINUE;
 }
 
