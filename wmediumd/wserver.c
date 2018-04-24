@@ -133,9 +133,9 @@ int handle_snr_update_request(struct request_ctx *ctx, const snr_update_request 
     	struct station *receiver = NULL;
     	struct station *station;
 
-        printf("pthread_rwlock_wrlock: handle_snr_update_request\n");
+        printf("handle_snr_update_request: WAIT LOCK\n");
         pthread_rwlock_wrlock(&snr_lock);
-        printf("pthread_rwlock_wrlock: handle_snr_update_request\tLOCKED\n");
+        printf("handle_snr_update_request: LOCKED\n");
 
         list_for_each_entry(station, &ctx->ctx->stations, list) {
             if (memcmp(&request->from_addr, station->addr, ETH_ALEN) == 0) {

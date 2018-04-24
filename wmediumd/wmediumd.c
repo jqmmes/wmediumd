@@ -166,6 +166,7 @@ void rearm_timer(struct wmediumd *ctx)
 		ctx->min_expires_set = true;
 		ctx->min_expires = min_expires;
 		//timerfd_settime(ctx->timerfd, TFD_TIMER_ABSTIME, &expires,
+		printf("rearm_timer\n");
 		timerfd_settime(timer_fd, TFD_TIMER_ABSTIME, &expires,
 				NULL);
 	}
@@ -174,9 +175,9 @@ void rearm_timer(struct wmediumd *ctx)
 void fast_timer_rearm(struct wmediumd *ctx, struct timespec frame_expires) {
 	struct itimerspec expires;
 	//w_logf(ctx, LOG_INFO, "process_messages_cb\t%lld\t%x:%x:%x:%x:%x:%x\t%lld%06ld\n", frame->cookie, frame->sender->hwaddr[0], frame->sender->hwaddr[1], frame->sender->hwaddr[2], frame->sender->hwaddr[3], frame->sender->hwaddr[4], frame->sender->hwaddr[5], now.tv_sec, now.tv_nsec/1000);
-	w_logf(ctx, LOG_INFO, "fast_timer_rearm\n");
+	w_logf(ctx, LOG_INFO, "fast_timer_rearm: WAIT LOCK\n");
 	pthread_rwlock_rdlock(&snr_lock);
-	w_logf(ctx, LOG_INFO, "fast_timer_rearm: 1\n");
+	w_logf(ctx, LOG_INFO, "fast_timer_rearm: LOCKED\n");
 	if (ctx->min_expires_set && !timespec_before(&frame_expires, &(ctx->min_expires))) return;
 	w_logf(ctx, LOG_INFO, "fast_timer_rearm: OK\n");
 	ctx->min_expires_set = true;
@@ -325,9 +326,15 @@ static struct station *get_station_by_addr(struct wmediumd *ctx, u8 *addr)
 	return NULL;
 }
 
-void queue_frame(struct wmediumd *ctx, struct station *station,
+/*void queue_frame(struct wmediumd *ctx, struct station *station,
 		 struct frame *frame)
-{
+{*/
+void queue_frame(void *args)
+	{
+	struct wmediumd *ctx = ((struct thpool_arg*)args)->ctx;
+	struct station *station = ((struct thpool_arg*)args)->station;
+	struct frame *frame = ((struct thpool_arg*)args)->frame;
+	printf("queue_frame\n");
 	struct ieee80211_hdr *hdr = (void *)frame->data;
 	u8 *dest = hdr->addr1;
 	struct timespec now, target;
@@ -466,13 +473,14 @@ void queue_frame(struct wmediumd *ctx, struct station *station,
 	//rearm_timer(ctx);
 	w_logf(ctx, LOG_INFO, "Frame %ld:\t", frame->cookie);
 	fast_timer_rearm(ctx, frame->expires);
+	send_tx_info_frame_nl(ctx, frame);
 	//deliver_frame(ctx, frame);
 }
 
 /*
  * Report transmit status to the kernel.
  */
-static int send_tx_info_frame_nl(struct wmediumd *ctx, struct frame *frame)
+int send_tx_info_frame_nl(struct wmediumd *ctx, struct frame *frame)
 {
 	struct nl_sock *sock = nl_listen_socket;//ctx->sock;
 	struct nl_msg *msg;
@@ -741,10 +749,11 @@ int nl_err_cb(struct sockaddr_nl *nla, struct nlmsgerr *nlerr, void *arg)
 }
 
 
-static void threaded_process_messages_cb(void *args) {
-	struct wmediumd *ctx = ((struct thpool_arg*)args)->ctx;
-	struct nl_msg *msg = ((struct thpool_arg*)args)->msg;
-	free(args);
+//static void threaded_process_messages_cb(void *args) {
+static void threaded_process_messages_cb(struct wmediumd *ctx, struct nl_msg *msg) {
+	//struct wmediumd *ctx = ((struct thpool_arg*)args)->ctx;
+	//struct nl_msg *msg = ((struct thpool_arg*)args)->msg;
+	//free(args);
 	struct nlattr *attrs[HWSIM_ATTR_MAX+1];
 	/* netlink header */
 	struct nlmsghdr *nlh = nlmsg_hdr(msg);
@@ -755,15 +764,18 @@ static void threaded_process_messages_cb(void *args) {
 	struct frame *frame;
 	struct ieee80211_hdr *hdr;
 	u8 *src;
-
+	printf("threaded_process_messages_cb\n");
 	struct timespec now;
 	clock_gettime(CLOCK_REALTIME, &now);
 	if (gnlh->cmd == HWSIM_CMD_FRAME) {
+		printf("threaded_process_messages_cb #1\n");
 		//pthread_rwlock_rdlock(&snr_lock);
 		/* we get the attributes*/
 		genlmsg_parse(nlh, 0, attrs, HWSIM_ATTR_MAX, NULL);
+		printf("threaded_process_messages_cb #1.1 %p\n", attrs[HWSIM_ATTR_ADDR_TRANSMITTER]);
 
 		if (attrs[HWSIM_ATTR_ADDR_TRANSMITTER]) {
+			printf("threaded_process_messages_cb #2\n");
 			u8 *hwaddr = (u8 *)nla_data(attrs[HWSIM_ATTR_ADDR_TRANSMITTER]);
 
 			unsigned int data_len =
@@ -825,13 +837,18 @@ static void threaded_process_messages_cb(void *args) {
 						 min(tx_rates_flags_len, sizeof(frame->tx_rates_flag)));
 
 
-			clock_gettime(CLOCK_REALTIME, &now);
-			w_logf(ctx, LOG_INFO, "process_messages_cb\t%lld\t%x:%x:%x:%x:%x:%x\t%lld%06ld\n", frame->cookie, frame->sender->hwaddr[0], frame->sender->hwaddr[1], frame->sender->hwaddr[2], frame->sender->hwaddr[3], frame->sender->hwaddr[4], frame->sender->hwaddr[5], now.tv_sec, now.tv_nsec/1000);
+			//clock_gettime(CLOCK_REALTIME, &now);
+			//w_logf(ctx, LOG_INFO, "process_messages_cb\t%lld\t%x:%x:%x:%x:%x:%x\t%lld%06ld\n", frame->cookie, frame->sender->hwaddr[0], frame->sender->hwaddr[1], frame->sender->hwaddr[2], frame->sender->hwaddr[3], frame->sender->hwaddr[4], frame->sender->hwaddr[5], now.tv_sec, now.tv_nsec/1000);
 			//w_logf(ctx, LOG_INFO, "%x:%x:%x:%x:%x:%x\n", frame->sender->hwaddr[0], frame->sender->hwaddr[1], frame->sender->hwaddr[2], frame->sender->hwaddr[3], frame->sender->hwaddr[4], frame->sender->hwaddr[5]);
-			queue_frame(ctx, sender, frame);
-			clock_gettime(CLOCK_REALTIME, &now);
-			w_logf(ctx, LOG_INFO, "process_messages_cb_e\t%lld\t%x:%x:%x:%x:%x:%x\t%lld%06ld\n", frame->cookie, frame->sender->hwaddr[0], frame->sender->hwaddr[1], frame->sender->hwaddr[2], frame->sender->hwaddr[3], frame->sender->hwaddr[4], frame->sender->hwaddr[5], now.tv_sec, now.tv_nsec/1000);
-			send_tx_info_frame_nl(ctx, frame);
+			//queue_frame(ctx, sender, frame);
+			struct thpool_arg *thpool_arg_data_ptr = malloc(sizeof(thpool_arg_data));
+			thpool_arg_data_ptr->ctx = ctx;
+			thpool_arg_data_ptr->station = sender;
+			thpool_arg_data_ptr->frame = frame;
+			thpool_add_work(ctx->thpool, (void *)queue_frame, thpool_arg_data_ptr);
+			//clock_gettime(CLOCK_REALTIME, &now);
+			//w_logf(ctx, LOG_INFO, "process_messages_cb_e\t%lld\t%x:%x:%x:%x:%x:%x\t%lld%06ld\n", frame->cookie, frame->sender->hwaddr[0], frame->sender->hwaddr[1], frame->sender->hwaddr[2], frame->sender->hwaddr[3], frame->sender->hwaddr[4], frame->sender->hwaddr[5], now.tv_sec, now.tv_nsec/1000);
+			//send_tx_info_frame_nl(ctx, frame);
 		}
 		//pthread_rwlock_unlock(&snr_lock);
 	}
@@ -844,12 +861,17 @@ static void threaded_process_messages_cb(void *args) {
 static int process_messages_cb(struct nl_msg *msg, void *arg)
 {
 	printf("process_messages_cb\n");
-	struct wmediumd *ctx = arg;
+	/*struct wmediumd *ctx = arg;
 	struct thpool_arg *thpool_arg_data_ptr = malloc(sizeof(thpool_arg_data));
 	thpool_arg_data_ptr->ctx = ctx;
 	thpool_arg_data_ptr->msg = msg;
-	thpool_add_work(ctx->thpool, (void *)threaded_process_messages_cb, thpool_arg_data_ptr);
-	return 0;
+	struct nlmsghdr *nlh = nlmsg_hdr(msg);
+	struct nlattr *attrs[HWSIM_ATTR_MAX+1];
+	genlmsg_parse(nlh, 0, attrs, HWSIM_ATTR_MAX, NULL);
+	printf("process_messages_cb #1 %p\n", attrs[HWSIM_ATTR_ADDR_TRANSMITTER]);
+	printf("process_messages_cb #1 %p\n", sizeof(struct nl_msg));
+	thpool_add_work(ctx->thpool, (void *)threaded_process_messages_cb, thpool_arg_data_ptr);*/
+	threaded_process_messages_cb(arg, msg);
 	return 0;
 }
 
@@ -971,8 +993,9 @@ void print_help(int exval)
 static void timer_cb(int fd, short what, void *data)
 {
 	struct wmediumd *ctx = data;
-
+	w_logf(ctx, LOG_INFO, "timer_cb: WAIT LOCK\n");
 	pthread_rwlock_rdlock(&snr_lock);
+	w_logf(ctx, LOG_INFO, "timer_cb: LOCKED\n");
 	ctx->move_stations(ctx);
 	deliver_expired_frames(ctx);
 	rearm_timer(ctx);
