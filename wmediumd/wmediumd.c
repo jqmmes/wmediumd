@@ -1000,8 +1000,8 @@ static void on_listen_event(int fd, short what, void *wctx) {
     if (actx->client_socket < 0) {
         //w_logf(actx->wctx, LOG_ERR, LOG_PREFIX "Accept failed: %s\n", strerror(errno));
     } else {
-      //thpool_add_work(((struct wmediumd*)wctx)->thpool, (void*)handle_accepted_connection, actx);
-      pthread_create(actx->thread, NULL, handle_accepted_connection, actx);
+      thpool_add_work(((struct wmediumd*)wctx)->thpool, (void*)handle_accepted_connection, actx);
+      //pthread_create(actx->thread, NULL, handle_accepted_connection, actx);
     }
 }
 
@@ -1025,7 +1025,6 @@ void main_loop_thread(void *args) {
 	//event_add(&ev_cmd, NULL);
 	//printf("%p", nl_listen_socket);
 	//printf("nl_listen_socket_fd: %d", nl_socket_get_fd(nl_listen_socket));
-	cmd_event_base = event_base_new();
 	ev_cmd = event_new(cmd_event_base, nl_socket_get_fd(nl_listen_socket), EV_READ | EV_PERSIST, sock_event_cb, ctx);
 	event_add(ev_cmd, NULL);
 
@@ -1038,7 +1037,6 @@ void main_loop_thread(void *args) {
 	//event_set(&ev_timer, ctx->timerfd, EV_READ | EV_PERSIST, timer_cb, ctx);
 	//event_set(&ev_timer, timer_fd, EV_READ | EV_PERSIST, timer_cb, ctx);
 	//event_add(&ev_timer, NULL);
-	timer_event_base = event_base_new();
 	ev_timer = event_new(timer_event_base, timer_fd, EV_READ | EV_PERSIST, timer_cb, ctx);
 	event_add(ev_timer, NULL);
 
@@ -1055,7 +1053,6 @@ void main_loop_thread(void *args) {
 				goto dispatch;
 		}
 		evutil_make_socket_nonblocking(listen_soc);
-		server_event_base = event_base_new();
 		printf("wserver listen_soc_fd: %d\n", listen_soc);
 		accept_event = event_new(server_event_base, listen_soc, EV_READ | EV_PERSIST, on_listen_event, ctx);
 		event_add(accept_event, NULL);
