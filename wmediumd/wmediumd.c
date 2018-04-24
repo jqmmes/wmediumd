@@ -468,10 +468,10 @@ void queue_frame(void *args)
 	timespec_add_usec(&target, send_time);
 	//timespec_add_usec(&target, 0);
 
-	//frame->duration = 0;//send_time;
-	//frame->expires = now;//target;
-	frame->duration = send_time;
-	frame->expires = target;
+	frame->duration = 0;//send_time;
+	frame->expires = now;//target;
+	//frame->duration = send_time;
+	//frame->expires = target;
 	list_add_tail(&frame->list, &queue->frames);
 	//rearm_timer(ctx);
 	w_logf(ctx, LOG_INFO, "Frame %ld:\t", frame->cookie);
@@ -1001,14 +1001,14 @@ static void timer_cb(int fd, short what, void *data)
 	struct wmediumd *ctx = data;
 	if (what == EV_READ) printf("timer_fd: EV_READ\n");
 	if (what == EV_WRITE) printf("timer_fd: EV_READ\n");
-	memset(expires, 0, sizeof(*expires));
-	timerfd_settime(timer_fd, TFD_TIMER_ABSTIME, expires,
-			NULL);
 	printf("expires.it_interval: %ld\n", expires->it_interval);
 	printf("expires.it_value: %ld\n", expires->it_value);
 	printf("timer_fd: %p\n", timer_fd);
 	w_logf(ctx, LOG_INFO, "timer_cb: WAIT LOCK\n");
 	pthread_rwlock_rdlock(&snr_lock);
+	memset(expires, 0, sizeof(*expires));
+	timerfd_settime(timer_fd, TFD_TIMER_ABSTIME, expires,
+			NULL);
 	w_logf(ctx, LOG_INFO, "timer_cb: LOCKED\n");
 	ctx->move_stations(ctx);
 	deliver_expired_frames(ctx);
