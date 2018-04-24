@@ -228,7 +228,7 @@ struct station {
 };
 
 struct wmediumd {
-	//int timerfd;
+	int timerfd;
 
 	//struct nl_sock *sock;
 

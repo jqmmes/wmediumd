@@ -47,6 +47,7 @@
 
 static struct nl_sock *nl_listen_socket;
 static int timer_fd;
+static struct itimerspec *expires;
 static struct event *ev_cmd;
 static struct event *ev_timer;
 static struct event_base *cmd_event_base;
@@ -135,10 +136,10 @@ static int timespec_sub(struct timespec *a, struct timespec *b,
 void rearm_timer(struct wmediumd *ctx)
 {
 	struct timespec min_expires;
-	struct itimerspec expires;
 	struct station *station;
 	struct frame *frame;
 	int i;
+	printf("rearm_timer\n");
 
 	bool set_min_expires = false;
 	//w_logf(ctx, LOG_INFO, "rearm_timer\n");
@@ -161,19 +162,18 @@ void rearm_timer(struct wmediumd *ctx)
 	}
 
 	if (set_min_expires) {
-		memset(&expires, 0, sizeof(expires));
-		expires.it_value = min_expires;
+		memset(expires, 0, sizeof(*expires));
+		expires->it_value = min_expires;
 		ctx->min_expires_set = true;
 		ctx->min_expires = min_expires;
 		//timerfd_settime(ctx->timerfd, TFD_TIMER_ABSTIME, &expires,
-		printf("rearm_timer\n");
-		timerfd_settime(timer_fd, TFD_TIMER_ABSTIME, &expires,
+		printf("rearm_timer: SET\n");
+		timerfd_settime(timer_fd, TFD_TIMER_ABSTIME, expires,
 				NULL);
 	}
 }
 
 void fast_timer_rearm(struct wmediumd *ctx, struct timespec frame_expires) {
-	struct itimerspec expires;
 	//w_logf(ctx, LOG_INFO, "process_messages_cb\t%lld\t%x:%x:%x:%x:%x:%x\t%lld%06ld\n", frame->cookie, frame->sender->hwaddr[0], frame->sender->hwaddr[1], frame->sender->hwaddr[2], frame->sender->hwaddr[3], frame->sender->hwaddr[4], frame->sender->hwaddr[5], now.tv_sec, now.tv_nsec/1000);
 	w_logf(ctx, LOG_INFO, "fast_timer_rearm: WAIT LOCK\n");
 	pthread_rwlock_rdlock(&snr_lock);
@@ -182,10 +182,13 @@ void fast_timer_rearm(struct wmediumd *ctx, struct timespec frame_expires) {
 	w_logf(ctx, LOG_INFO, "fast_timer_rearm: OK\n");
 	ctx->min_expires_set = true;
 	ctx->min_expires = frame_expires;
-	memset(&expires, 0, sizeof(expires));
-	expires.it_value = frame_expires;
+	printf("expires.it_interval: %ld\n", expires->it_interval);
+	printf("expires.it_value: %ld\n", expires->it_value);
+	printf("timer_fd: %p\n", timer_fd);
+	memset(expires, 0, sizeof(*expires));
+	expires->it_value = frame_expires;
 	//timerfd_settime(ctx->timerfd, TFD_TIMER_ABSTIME, &expires,
-	timerfd_settime(timer_fd, TFD_TIMER_ABSTIME, &expires,
+	timerfd_settime(timer_fd, TFD_TIMER_ABSTIME, expires,
 			NULL);
 	pthread_rwlock_unlock(&snr_lock);
 }
@@ -675,16 +678,19 @@ void deliver_expired_frames_queue(struct wmediumd *ctx,
 				  struct timespec *now)
 {
 	struct frame *frame, *tmp;
+	bool expired_frame_delivered_flag = false;
 
 	list_for_each_entry_safe(frame, tmp, queue, list) {
 		if (timespec_before(&frame->expires, now)) {
 			list_del(&frame->list);
 			deliver_frame(ctx, frame);
+			expired_frame_delivered_flag |= 1;
 			if (ctx->min_expires_set) ctx->min_expires_set = false;
 		} else {
 			break;
 		}
 	}
+	if (expired_frame_delivered_flag & 1) rearm_timer(ctx);
 }
 
 void deliver_expired_frames(struct wmediumd *ctx)
@@ -993,12 +999,20 @@ void print_help(int exval)
 static void timer_cb(int fd, short what, void *data)
 {
 	struct wmediumd *ctx = data;
+	if (what == EV_READ) printf("timer_fd: EV_READ\n");
+	if (what == EV_WRITE) printf("timer_fd: EV_READ\n");
+	memset(expires, 0, sizeof(*expires));
+	timerfd_settime(timer_fd, TFD_TIMER_ABSTIME, expires,
+			NULL);
+	printf("expires.it_interval: %ld\n", expires->it_interval);
+	printf("expires.it_value: %ld\n", expires->it_value);
+	printf("timer_fd: %p\n", timer_fd);
 	w_logf(ctx, LOG_INFO, "timer_cb: WAIT LOCK\n");
 	pthread_rwlock_rdlock(&snr_lock);
 	w_logf(ctx, LOG_INFO, "timer_cb: LOCKED\n");
 	ctx->move_stations(ctx);
 	deliver_expired_frames(ctx);
-	rearm_timer(ctx);
+	//rearm_timer(ctx);
 	pthread_rwlock_unlock(&snr_lock);
 }
 
@@ -1054,12 +1068,19 @@ void main_loop_thread(void *args) {
 	/* setup timers */
 	//ctx->timerfd = timerfd_create(CLOCK_MONOTONIC, 0);
 	timer_fd = timerfd_create(CLOCK_MONOTONIC, 0);
+	expires = malloc(sizeof(struct itimerspec));
 	clock_gettime(CLOCK_MONOTONIC, &(ctx->intf_updated));
 	clock_gettime(CLOCK_MONOTONIC, &(ctx->next_move));
 	ctx->next_move.tv_sec += MOVE_INTERVAL;
 	//event_set(&ev_timer, ctx->timerfd, EV_READ | EV_PERSIST, timer_cb, ctx);
 	//event_set(&ev_timer, timer_fd, EV_READ | EV_PERSIST, timer_cb, ctx);
 	//event_add(&ev_timer, NULL);
+	//ev_timer = event_new(timer_event_base, timer_fd, EV_READ | EV_PERSIST, timer_cb, ctx);
+	//event_add(ev_timer, NULL);
+
+	//printf("%p\n", &timer_fd);
+	//printf("%ld\n", timer_fd.it_value);
+	//printf("%ld\n", timer_fd.it_interval);
 	ev_timer = event_new(timer_event_base, timer_fd, EV_READ | EV_PERSIST, timer_cb, ctx);
 	event_add(ev_timer, NULL);
 
