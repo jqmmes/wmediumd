@@ -168,6 +168,8 @@ void rearm_timer(struct wmediumd *ctx)
 		ctx->min_expires = min_expires;
 		//timerfd_settime(ctx->timerfd, TFD_TIMER_ABSTIME, &expires,
 		printf("rearm_timer: SET\n");
+		printf("rearm_timer: expires.it_interval: %ld\n", expires->it_interval);
+		printf("rearm_timer: expires.it_value: %lf\n", expires->it_value);
 		timerfd_settime(timer_fd, TFD_TIMER_ABSTIME, expires,
 				NULL);
 	}
@@ -175,22 +177,28 @@ void rearm_timer(struct wmediumd *ctx)
 
 void fast_timer_rearm(struct wmediumd *ctx, struct timespec frame_expires) {
 	//w_logf(ctx, LOG_INFO, "process_messages_cb\t%lld\t%x:%x:%x:%x:%x:%x\t%lld%06ld\n", frame->cookie, frame->sender->hwaddr[0], frame->sender->hwaddr[1], frame->sender->hwaddr[2], frame->sender->hwaddr[3], frame->sender->hwaddr[4], frame->sender->hwaddr[5], now.tv_sec, now.tv_nsec/1000);
-	w_logf(ctx, LOG_INFO, "fast_timer_rearm: WAIT LOCK\n");
-	pthread_rwlock_rdlock(&snr_lock);
-	w_logf(ctx, LOG_INFO, "fast_timer_rearm: LOCKED\n");
-	if (ctx->min_expires_set && !timespec_before(&frame_expires, &(ctx->min_expires))) return;
-	w_logf(ctx, LOG_INFO, "fast_timer_rearm: OK\n");
+	w_logf(ctx, LOG_INFO, "fast_timer_rearm: WAIT LOCK\t%ld.%ld\n", frame_expires.tv_sec, frame_expires.tv_nsec);
+	pthread_rwlock_wrlock(&snr_lock);
+	w_logf(ctx, LOG_INFO, "fast_timer_rearm: LOCKED\t%ld\n", frame_expires);
+	if (ctx->min_expires_set && !timespec_before(&frame_expires, &(ctx->min_expires))) goto fast_timer_rearm_out;
+	//w_logf(ctx, LOG_INFO, "fast_timer_rearm: OK\t%ld\n", frame_expires);
+	printf("fast_timer_rearm: OK\n");
 	ctx->min_expires_set = true;
 	ctx->min_expires = frame_expires;
-	printf("expires.it_interval: %ld\n", expires->it_interval);
-	printf("expires.it_value: %ld\n", expires->it_value);
-	printf("timer_fd: %p\n", timer_fd);
+	//printf("fast_timer_rearm: expires.it_interval: %ld\n", expires->it_interval);
+	//printf("fast_timer_rearm: expires.it_value: %lf\n", expires->it_value);
+	//printf("fast_timer_rearm: timer_fd: %p\n", timer_fd);
 	memset(expires, 0, sizeof(*expires));
 	expires->it_value = frame_expires;
+	//printf("fast_timer_rearm: frame_expires: %ld\n", frame_expires);
+	printf("fast_timer_rearm: frame_expires: %ld\n", expires->it_value);
 	//timerfd_settime(ctx->timerfd, TFD_TIMER_ABSTIME, &expires,
 	timerfd_settime(timer_fd, TFD_TIMER_ABSTIME, expires,
 			NULL);
+	printf("timerfd SET\n");
+	fast_timer_rearm_out:
 	pthread_rwlock_unlock(&snr_lock);
+	w_logf(ctx, LOG_INFO, "fast_timer_rearm: UNLOCKED\n");
 }
 
 static inline bool frame_has_a4(struct frame *frame)
@@ -338,6 +346,7 @@ void queue_frame(void *args)
 	struct station *station = ((struct thpool_arg*)args)->station;
 	struct frame *frame = ((struct thpool_arg*)args)->frame;
 	printf("queue_frame\n");
+	printf("send_tx_info_frame_nl #0.0 %p\n", frame->sender->hwaddr);
 	struct ieee80211_hdr *hdr = (void *)frame->data;
 	u8 *dest = hdr->addr1;
 	struct timespec now, target;
@@ -472,10 +481,16 @@ void queue_frame(void *args)
 	frame->expires = now;//target;
 	//frame->duration = send_time;
 	//frame->expires = target;
+	pthread_rwlock_wrlock(&snr_lock);
 	list_add_tail(&frame->list, &queue->frames);
+	pthread_rwlock_unlock(&snr_lock);
 	//rearm_timer(ctx);
-	w_logf(ctx, LOG_INFO, "Frame %ld:\t", frame->cookie);
+	w_logf(ctx, LOG_INFO, "Frame %ld:\t\n", frame->cookie);
+	printf("fast_timer_rearm: before: %ld\n", now);
+	printf("fast_timer_rearm: before: %ld\n", frame->expires);
 	fast_timer_rearm(ctx, frame->expires);
+	printf("queue_frame: will send send_tx_info_frame_nl\n");
+	printf("send_tx_info_frame_nl #0 %p\n", frame->sender->hwaddr);
 	send_tx_info_frame_nl(ctx, frame);
 	//deliver_frame(ctx, frame);
 }
@@ -488,6 +503,8 @@ int send_tx_info_frame_nl(struct wmediumd *ctx, struct frame *frame)
 	struct nl_sock *sock = nl_listen_socket;//ctx->sock;
 	struct nl_msg *msg;
 	int ret;
+	printf("send_tx_info_frame_nl: #1\n");
+	printf("%p\n", frame->sender->hwaddr);
 
 	msg = nlmsg_alloc();
 	if (!msg) {
@@ -503,7 +520,30 @@ int send_tx_info_frame_nl(struct wmediumd *ctx, struct frame *frame)
 		goto out;
 	}
 
-	if (nla_put(msg, HWSIM_ATTR_ADDR_TRANSMITTER, ETH_ALEN,
+	printf("send_tx_info_frame_nl: #2\n");
+
+	pthread_rwlock_rdlock(&snr_lock);
+	printf("%p\n", frame->sender->hwaddr);
+	printf("send_tx_info_frame_nl: #2.0\n");
+	nla_put(msg, HWSIM_ATTR_ADDR_TRANSMITTER, ETH_ALEN,
+		    frame->sender->hwaddr);
+				printf("send_tx_info_frame_nl: #2.1\n");
+	    nla_put_u32(msg, HWSIM_ATTR_FLAGS, frame->flags);
+			printf("send_tx_info_frame_nl: #2.2\n");
+	    nla_put_u32(msg, HWSIM_ATTR_SIGNAL, frame->signal);
+			printf("send_tx_info_frame_nl: #2.3\n");
+	    nla_put(msg, HWSIM_ATTR_TX_INFO,
+		    frame->tx_rates_count * sizeof(struct hwsim_tx_rate),
+		    frame->tx_rates);
+				printf("send_tx_info_frame_nl: #2.4\n");
+			nla_put(msg, HWSIM_ATTR_TX_INFO_FLAGS,
+				frame->tx_rates_flag_count * sizeof( struct hwsim_tx_rate_flag),
+				frame->tx_rates_flag);
+				printf("send_tx_info_frame_nl: #2.5\n");
+	    nla_put_u64(msg, HWSIM_ATTR_COOKIE, frame->cookie);
+			printf("send_tx_info_frame_nl: #2.6\n");
+
+	/*if (nla_put(msg, HWSIM_ATTR_ADDR_TRANSMITTER, ETH_ALEN,
 		    frame->sender->hwaddr) ||
 	    nla_put_u32(msg, HWSIM_ATTR_FLAGS, frame->flags) ||
 	    nla_put_u32(msg, HWSIM_ATTR_SIGNAL, frame->signal) ||
@@ -514,24 +554,33 @@ int send_tx_info_frame_nl(struct wmediumd *ctx, struct frame *frame)
 				frame->tx_rates_flag_count * sizeof( struct hwsim_tx_rate_flag),
 				frame->tx_rates_flag) ||
 	    nla_put_u64(msg, HWSIM_ATTR_COOKIE, frame->cookie)) {
+					printf("send_tx_info_frame_nl: #2.1\n");
 			w_logf(ctx, LOG_ERR, "%s: Failed to fill a payload\n", __func__);
 			ret = -1;
 			goto out;
-	}
+	}*/
+
+	printf("send_tx_info_frame_nl: #3\n");
+
 	struct timespec now;
 	clock_gettime(CLOCK_REALTIME, &now);
 	w_logf(ctx, LOG_INFO, "send_tx_info_frame_nl\t%lld\t%x:%x:%x:%x:%x:%x\t%lld%06ld\n", frame->cookie, frame->sender->hwaddr[0], frame->sender->hwaddr[1], frame->sender->hwaddr[2], frame->sender->hwaddr[3], frame->sender->hwaddr[4], frame->sender->hwaddr[5], now.tv_sec, now.tv_nsec/1000);
 	//w_logf(ctx, LOG_INFO, "%lld.%.9ld\t%lld\tsend_tx_info_frame_nl\n", now.tv_sec, now.tv_nsec, frame->cookie);
 	ret = nl_send_auto_complete(sock, msg);
+
+	printf("send_tx_info_frame_nl: #4\n");
 	if (ret < 0) {
 		w_logf(ctx, LOG_ERR, "%s: nl_send_auto failed\n", __func__);
 		ret = -1;
 		goto out;
 	}
 	ret = 0;
+	pthread_rwlock_unlock(&snr_lock);
 
+printf("send_tx_info_frame_nl: #5\n");
 out:
 	nlmsg_free(msg);
+	printf("send_tx_info_frame_nl: #6\n");
 	return ret;
 }
 
@@ -545,6 +594,7 @@ int send_cloned_frame_msg(struct wmediumd *ctx, struct station *dst,
 	struct nl_sock *sock = nl_listen_socket;//ctx->sock;
 	int ret;
 
+	printf("send_cloned_frame_msg\n");
 	msg = nlmsg_alloc();
 	if (!msg) {
 		w_logf(ctx, LOG_ERR, "Error allocating new message MSG!\n");
@@ -583,14 +633,19 @@ int send_cloned_frame_msg(struct wmediumd *ctx, struct station *dst,
 
 	struct timespec now;
 	clock_gettime(CLOCK_REALTIME, &now);
-	w_logf(ctx, LOG_INFO, "send_cloned_frame_msg\t%lld\t%x:%x:%x:%x:%x:%x\t%lld%06ld\n", frame->cookie, frame->sender->hwaddr[0], frame->sender->hwaddr[1], frame->sender->hwaddr[2], frame->sender->hwaddr[3], frame->sender->hwaddr[4], frame->sender->hwaddr[5], now.tv_sec, now.tv_nsec/1000);
-	ret = nl_send_auto_complete(sock, msg);
+	w_logf(ctx, LOG_INFO, "S\tsend_cloned_frame_msg\t%lld\t%x:%x:%x:%x:%x:%x\t%lld%06ld\n", frame->cookie, frame->sender->hwaddr[0], frame->sender->hwaddr[1], frame->sender->hwaddr[2], frame->sender->hwaddr[3], frame->sender->hwaddr[4], frame->sender->hwaddr[5], now.tv_sec, now.tv_nsec/1000);
+	//ret = nl_send_auto_complete(sock, msg);
+	nl_complete_msg(sock, msg);
+	ret = nl_send(sock, msg);
+	//ret = nl_send_sync(sock, msg);
+	nl_wait_for_ack(sock);
 	if (ret < 0) {
 		w_logf(ctx, LOG_ERR, "%s: nl_send_auto failed\n", __func__);
 		ret = -1;
 		goto out;
 	}
 	ret = 0;
+	w_logf(ctx, LOG_INFO, "E\tsend_cloned_frame_msg\t%lld\t%x:%x:%x:%x:%x:%x\t%lld%06ld\n", frame->cookie, frame->sender->hwaddr[0], frame->sender->hwaddr[1], frame->sender->hwaddr[2], frame->sender->hwaddr[3], frame->sender->hwaddr[4], frame->sender->hwaddr[5], now.tv_sec, now.tv_nsec/1000);
 
 out:
 	nlmsg_free(msg);
@@ -603,6 +658,7 @@ void deliver_frame(struct wmediumd *ctx, struct frame *frame)
 	struct station *station;
 	u8 *dest = hdr->addr1;
 	u8 *src = frame->sender->addr;
+	printf("deliver_frame\n");
 
 	if (frame->flags & HWSIM_TX_STAT_ACK) {
 		/* rx the frame on the dest interface */
@@ -670,7 +726,7 @@ void deliver_frame(struct wmediumd *ctx, struct frame *frame)
 
 	//send_tx_info_frame_nl(ctx, frame);
 
-	free(frame);
+	//free(frame);
 }
 
 void deliver_expired_frames_queue(struct wmediumd *ctx,
@@ -679,8 +735,9 @@ void deliver_expired_frames_queue(struct wmediumd *ctx,
 {
 	struct frame *frame, *tmp;
 	bool expired_frame_delivered_flag = false;
-
+	//printf("deliver_expired_frames_queue\n");
 	list_for_each_entry_safe(frame, tmp, queue, list) {
+		printf("deliver_expired_frames_queue\t%ld.%ld\t%ld.%ld\n", ((struct timespec *)&frame->expires)->tv_sec, ((struct timespec *)&frame->expires)->tv_nsec, now->tv_sec,  now->tv_nsec);
 		if (timespec_before(&frame->expires, now)) {
 			list_del(&frame->list);
 			deliver_frame(ctx, frame);
@@ -699,6 +756,7 @@ void deliver_expired_frames(struct wmediumd *ctx)
 	struct station *station;
 	//struct list_head *l;
 	int i, j, duration;
+	printf("deliver_expired_frames\n");
 
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	list_for_each_entry(station, &ctx->stations, list) {
@@ -783,6 +841,7 @@ static void threaded_process_messages_cb(struct wmediumd *ctx, struct nl_msg *ms
 		if (attrs[HWSIM_ATTR_ADDR_TRANSMITTER]) {
 			printf("threaded_process_messages_cb #2\n");
 			u8 *hwaddr = (u8 *)nla_data(attrs[HWSIM_ATTR_ADDR_TRANSMITTER]);
+			printf("send_tx: %p\n", hwaddr);
 
 			unsigned int data_len =
 				nla_len(attrs[HWSIM_ATTR_FRAME]);
@@ -815,6 +874,7 @@ static void threaded_process_messages_cb(struct wmediumd *ctx, struct nl_msg *ms
 			if (data_len < 6 + 6 + 4)
 				return;
 
+			printf("threaded_process_messages_cb #3\n");
 			sender = get_station_by_addr(ctx, src);
 			if (!sender) {
 				w_flogf(ctx, LOG_ERR, stderr, "Unable to find sender station " MAC_FMT "\n", MAC_ARGS(src));
@@ -851,7 +911,9 @@ static void threaded_process_messages_cb(struct wmediumd *ctx, struct nl_msg *ms
 			thpool_arg_data_ptr->ctx = ctx;
 			thpool_arg_data_ptr->station = sender;
 			thpool_arg_data_ptr->frame = frame;
+			printf("threaded_process_messages_cb hwaddr %p\n", ((struct station *)(thpool_arg_data_ptr->station))->hwaddr);
 			thpool_add_work(ctx->thpool, (void *)queue_frame, thpool_arg_data_ptr);
+			printf("threaded_process_messages_cb #4\n");
 			//clock_gettime(CLOCK_REALTIME, &now);
 			//w_logf(ctx, LOG_INFO, "process_messages_cb_e\t%lld\t%x:%x:%x:%x:%x:%x\t%lld%06ld\n", frame->cookie, frame->sender->hwaddr[0], frame->sender->hwaddr[1], frame->sender->hwaddr[2], frame->sender->hwaddr[3], frame->sender->hwaddr[4], frame->sender->hwaddr[5], now.tv_sec, now.tv_nsec/1000);
 			//send_tx_info_frame_nl(ctx, frame);
@@ -905,7 +967,13 @@ int send_register_msg(struct wmediumd *ctx)
 		goto out;
 	}
 
-	ret = nl_send_auto_complete(sock, msg);
+	//ret = nl_send_auto_complete(sock, msg);
+	pthread_rwlock_wrlock(&snr_lock);
+	nl_complete_msg(sock, msg);
+	ret = nl_send(sock, msg);
+	//nl_send_sync(sock, msg);
+	nl_wait_for_ack(sock);
+	pthread_rwlock_unlock(&snr_lock);
 	printf("send_register_msg %d\n", ret);
 	if (ret < 0) {
 		w_logf(ctx, LOG_ERR, "%s: nl_send_auto failed\n", __func__);
@@ -1004,12 +1072,14 @@ static void timer_cb(int fd, short what, void *data)
 	printf("expires.it_interval: %ld\n", expires->it_interval);
 	printf("expires.it_value: %ld\n", expires->it_value);
 	printf("timer_fd: %p\n", timer_fd);
-	w_logf(ctx, LOG_INFO, "timer_cb: WAIT LOCK\n");
-	pthread_rwlock_rdlock(&snr_lock);
+	printf("timer_cb: WAIT LOCK\n");
+	pthread_rwlock_wrlock(&snr_lock);
+	printf("timer_cb: LOCKED\n");
 	memset(expires, 0, sizeof(*expires));
 	timerfd_settime(timer_fd, TFD_TIMER_ABSTIME, expires,
 			NULL);
-	w_logf(ctx, LOG_INFO, "timer_cb: LOCKED\n");
+	printf("timer_cb: timerfd_set\n");
+	//w_logf(ctx, LOG_INFO, "timer_cb: LOCKED\n");
 	ctx->move_stations(ctx);
 	deliver_expired_frames(ctx);
 	//rearm_timer(ctx);
