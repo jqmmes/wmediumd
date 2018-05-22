@@ -167,10 +167,10 @@ void rearm_timer(struct wmediumd *ctx)
 		ctx->min_expires_set = true;
 		ctx->min_expires = min_expires;
 		//timerfd_settime(ctx->timerfd, TFD_TIMER_ABSTIME, &expires,
-		//printf("rearm_timer: SET\n");
+		printf("rearm_timer: SET\n");
 		//printf("rearm_timer: expires.it_interval: %ld\n", expires->it_interval);
 		//printf("rearm_timer: expires.it_value: %lf\n", expires->it_value);
-		printf("TIMER #0\t%lu\n", pthread_self());
+		//printf("TIMER #0\t%lu\n", pthread_self());
 		timerfd_settime(timer_fd, TFD_TIMER_ABSTIME, expires,
 				NULL);
 	}
@@ -178,23 +178,23 @@ void rearm_timer(struct wmediumd *ctx)
 
 void fast_timer_rearm(struct wmediumd *ctx, struct timespec frame_expires) {
 	//w_logf(ctx, LOG_INFO, "process_messages_cb\t%lld\t%x:%x:%x:%x:%x:%x\t%lld%06ld\n", frame->cookie, frame->sender->hwaddr[0], frame->sender->hwaddr[1], frame->sender->hwaddr[2], frame->sender->hwaddr[3], frame->sender->hwaddr[4], frame->sender->hwaddr[5], now.tv_sec, now.tv_nsec/1000);
-	//w_logf(ctx, LOG_INFO, "fast_timer_rearm: WAIT LOCK\t%ld.%ld\n", frame_expires.tv_sec, frame_expires.tv_nsec);
+	w_logf(ctx, LOG_INFO, "fast_timer_rearm: WAIT LOCK\t%ld.%ld\n", frame_expires.tv_sec, frame_expires.tv_nsec);
 	pthread_rwlock_wrlock(&snr_lock);
-	//w_logf(ctx, LOG_INFO, "fast_timer_rearm: LOCKED\t%ld\n", frame_expires);
+	w_logf(ctx, LOG_INFO, "fast_timer_rearm: LOCKED\t%ld.%ld\t%d\n", ctx->min_expires.tv_sec, ctx->min_expires.tv_nsec, ctx->min_expires_set);
 	if (ctx->min_expires_set && !timespec_before(&frame_expires, &(ctx->min_expires))) goto fast_timer_rearm_out;
-	//w_logf(ctx, LOG_INFO, "fast_timer_rearm: OK\t%ld\n", frame_expires);
-	//printf("fast_timer_rearm: OK\n");
+	w_logf(ctx, LOG_INFO, "fast_timer_rearm: OK\t%ld\n", frame_expires);
+	printf("fast_timer_rearm: OK\n");
 	ctx->min_expires_set = true;
 	ctx->min_expires = frame_expires;
-	//printf("fast_timer_rearm: expires.it_interval: %ld\n", expires->it_interval);
-	//printf("fast_timer_rearm: expires.it_value: %lf\n", expires->it_value);
-	//printf("fast_timer_rearm: timer_fd: %p\n", timer_fd);
+	printf("fast_timer_rearm: expires.it_interval: %ld\n", expires->it_interval);
+	printf("fast_timer_rearm: expires.it_value: %lf\n", expires->it_value);
+	printf("fast_timer_rearm: timer_fd: %p\n", timer_fd);
 	memset(expires, 0, sizeof(*expires));
 	expires->it_value = frame_expires;
 	//printf("fast_timer_rearm: frame_expires: %ld\n", frame_expires);
 	//printf("fast_timer_rearm: frame_expires: %ld\n", expires->it_value);
 	//timerfd_settime(ctx->timerfd, TFD_TIMER_ABSTIME, &expires,
-	printf("TIMER #1\t%lu\n", pthread_self());
+	//printf("TIMER #1\t%lu\n", pthread_self());
 	timerfd_settime(timer_fd, TFD_TIMER_ABSTIME, expires,
 			NULL);
 	//printf("timerfd SET\n");
@@ -656,8 +656,12 @@ out:
 	return ret;
 }
 
-void deliver_frame(struct wmediumd *ctx, struct frame *frame)
-{
+//void deliver_frame(struct wmediumd *ctx, struct frame *frame)
+//{
+void deliver_frame(void *args)
+	{
+	struct wmediumd *ctx = ((struct thpool_arg*)args)->ctx;
+	struct frame *frame = ((struct thpool_arg*)args)->frame;
 	struct ieee80211_hdr *hdr = (void *) frame->data;
 	struct station *station;
 	u8 *dest = hdr->addr1;
@@ -745,14 +749,21 @@ void deliver_expired_frames_queue(struct wmediumd *ctx,
 		printf("deliver_expired_frames_queue\t%ld.%ld\t%ld.%ld\n", ((struct timespec *)&frame->expires)->tv_sec, ((struct timespec *)&frame->expires)->tv_nsec, now->tv_sec,  now->tv_nsec);
 		if (timespec_before(&frame->expires, now)) {
 			list_del(&frame->list);
-			deliver_frame(ctx, frame);
+			//deliver_frame(ctx, frame);
+			struct thpool_arg *thpool_arg_data_ptr = malloc(sizeof(thpool_arg_data));
+			thpool_arg_data_ptr->ctx = ctx;
+			//thpool_arg_data_ptr->station = sender;
+			thpool_arg_data_ptr->frame = frame;
+			thpool_add_work(ctx->thpool, (void *)deliver_frame, thpool_arg_data_ptr);
+			//thpool_add_work()
 			expired_frame_delivered_flag |= 1;
-			//if (ctx->min_expires_set) ctx->min_expires_set = false;
+//			if (!ctx->min_expires_set) ctx->min_expires_set = true;
 		} else {
 			break;
 		}
 	}
 	if (ctx->min_expires_set) ctx->min_expires_set = false;
+	//if (ctx->min_expires_set) ctx->min_expires_set = false;
 	if (expired_frame_delivered_flag & 1) rearm_timer(ctx);
 }
 
