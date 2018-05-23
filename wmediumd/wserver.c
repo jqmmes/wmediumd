@@ -672,67 +672,6 @@ void *handle_accepted_connection(void *d_ptr) {
     return NULL;
 }
 
-/*static void on_listen_event(int fd, short what, void *wctx) {
-    printf("on_listen_event\n" );
-    UNUSED(fd);
-    UNUSED(what);
-    struct accept_context *actx = malloc(sizeof(struct accept_context));
-    if (!actx) {
-        w_logf(wctx, LOG_ERR, "Error during allocation of memory in on_listen_event wmediumd/wserver.c\n");
-        return;
-    }
-    actx->wctx = wctx;
-    actx->server_socket = fd;
-    actx->thread = malloc(sizeof(pthread_t));
-    if (!actx->thread) {
-        w_logf(wctx, LOG_ERR, "Error during allocation of memory in on_listen_event wmediumd/wserver.c\n");
-        free(actx);
-        return;
-    }
-    actx->client_socket = accept_connection(actx->server_socket);
-    if (actx->client_socket < 0) {
-        w_logf(actx->wctx, LOG_ERR, LOG_PREFIX "Accept failed: %s\n", strerror(errno));
-    } else {
-      //thpool_add_work(((struct wmediumd*)wctx)->thpool, (void*)handle_accepted_connection, actx);
-      pthread_create(actx->thread, NULL, handle_accepted_connection, actx);
-    }
-}*/
-
-/**
- * Run the server using the given wmediumd context
- * @param ctx The wmediumd context
- * @return NULL, required for pthread
- */
-/*void *run_wserver(void *ctx) {
-    struct event *accept_event;
-
-    old_sig_handler = signal(SIGINT, handle_sigint);
-
-    listen_soc = create_listen_socket(ctx);
-    if (listen_soc < 0) {
-        return NULL;
-    }
-    w_logf(ctx, LOG_INFO, LOG_PREFIX "Listening for incoming connection\n");
-
-    evutil_make_socket_nonblocking(listen_soc);
-    server_event_base = event_base_new();
-    printf("wserver listen_soc_fd: %d", listen_soc);
-    accept_event = event_new(server_event_base, listen_soc, EV_READ | EV_PERSIST, on_listen_event, ctx);
-    event_add(accept_event, NULL);
-
-    w_logf(ctx, LOG_INFO, LOG_PREFIX "Waiting for client to connect...\n");
-    event_base_dispatch(server_event_base);
-
-    event_free(accept_event);
-    event_base_free(server_event_base);
-    stop_wserver();
-    return NULL;
-}*/
-
-/*int start_wserver(struct wmediumd *ctx) {
-    return pthread_create(&server_thread, NULL, run_wserver, ctx);
-}*/
-
 void stop_wserver() {
     signal(SIGINT, old_sig_handler);
     pthread_cancel(server_thread);

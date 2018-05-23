@@ -164,6 +164,7 @@ enum hwsim_tx_rate_flags {
 #include <netlink/genl/genl.h>
 #include <netlink/genl/ctrl.h>
 #include <netlink/genl/family.h>
+#include <pthread.h>
 
 #include "list.h"
 #include "ieee80211.h"
@@ -331,6 +332,8 @@ struct intf_info {
 	int duration;
 	double prob_col;
 };
+
+unsigned int tx_info_frame[1000];
 
 void station_init_queues(struct station *station);
 double get_error_prob_from_snr(double snr, unsigned int rate_idx, u32 freq,
