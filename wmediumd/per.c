@@ -283,3 +283,10 @@ int index_to_rate(size_t index, u32 freq)
 	return rateset[index].mbps;
 	//return rateset[11].mbps;
 }
+
+int index_to_ht_rate(size_t index) {
+	if (index > 7 && index < 16) return rateset[index - 8 + 4].mbps * 2;
+	else if (index > 15 && index < 24) return rateset[index - 16 + 4].mbps * 3;
+	else if (index > 23) return rateset[index - 24 + 4].mbps * 4;
+	else return rateset[index + 4].mbps;
+}

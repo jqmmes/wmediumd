@@ -53,7 +53,6 @@ static struct event_base *timer_event_base;
 static struct event *accept_event;
 static int listen_soc;
 static struct event_base *server_event_base;
-static struct list_head* tx_info_frame_list;
 
 pthread_rwlock_t timer_lock = PTHREAD_RWLOCK_INITIALIZER;
 
@@ -402,9 +401,10 @@ void queue_frame(void *args)
 						 frame->freq, frame->data_len,
 						 station, deststa);
 		for (j = 0; j < frame->tx_rates[i].count; j++) {
+			printf("-------> %d\n", frame->tx_rates_flag[i].flags);
 			send_time += difs + pkt_duration(frame->data_len,
 				index_to_rate(rate_idx, frame->freq));
-
+				printf("send_time: %d\nack_time_usec: %d\n", send_time, ack_time_usec);
 			retries++;
 
 			/* skip ack/backoff/retries for noack frames */
@@ -453,6 +453,7 @@ void queue_frame(void *args)
 			if (tail && timespec_before(&target, &tail->expires))
 				target = tail->expires;
 		}
+		printf("target: %ld.%ld\n", target.tv_sec, target.tv_nsec);
 	}
 
 	timespec_add_usec(&target, send_time);
@@ -463,7 +464,6 @@ void queue_frame(void *args)
 	//frame->duration = send_time;
 	//frame->expires = target;
 	pthread_rwlock_wrlock(&snr_lock);
-	list_add_tail(&)
 	list_add_tail(&frame->list, &queue->frames);
 	pthread_rwlock_unlock(&snr_lock);
 	fast_timer_rearm(ctx, frame->expires);
@@ -504,13 +504,13 @@ int send_tx_info_frame_nl(struct wmediumd *ctx, struct frame *frame)
 				frame->tx_rates_flag_count * sizeof( struct hwsim_tx_rate_flag),
 				frame->tx_rates_flag) ||
 	    nla_put_u64(msg, HWSIM_ATTR_COOKIE, frame->cookie)) {
-					printf("send_tx_info_frame_nl: #2.1\n");
 			w_logf(ctx, LOG_ERR, "%s: Failed to fill a payload\n", __func__);
 			ret = -1;
 			goto out;
 	}
 	/*TODO: replace deprecated nl_send_auto_complete */
 	ret = nl_send_auto_complete(sock, msg);
+	printf("tx_info_flags: %d\n", frame->tx_rates_flag[0].flags);
 
 	if (ret < 0) {
 		w_logf(ctx, LOG_ERR, "%s: nl_send_auto failed\n", __func__);
@@ -566,6 +566,8 @@ int send_cloned_frame_msg(struct wmediumd *ctx, struct station *dst,
 			ret = -1;
 			goto out;
 	}
+
+	printf("tx_cloned_flags: %d\n", frame->tx_rates_flag[0].flags);
 
 	w_logf(ctx, LOG_DEBUG, "cloned msg dest " MAC_FMT " (radio: " MAC_FMT ") len %d\n",
 		   MAC_ARGS(dst->addr), MAC_ARGS(dst->hwaddr), data_len);
@@ -817,6 +819,7 @@ static void threaded_process_messages_cb(struct wmediumd *ctx, struct nl_msg *ms
 				tx_rates_flags_len / sizeof(struct hwsim_tx_rate_flag);
 			memcpy(frame->tx_rates_flag, tx_rates_flag,
 						 min(tx_rates_flags_len, sizeof(frame->tx_rates_flag)));
+			printf("rcv_flags: %d\n", frame->tx_rates_flag[0].flags);
 
 			struct thpool_arg *thpool_arg_data_ptr = malloc(sizeof(thpool_arg_data));
 			thpool_arg_data_ptr->ctx = ctx;
@@ -980,7 +983,6 @@ static void on_listen_event(int fd, short what, void *wctx) {
 void main_loop_thread(void *args) {
 	struct wmediumd *ctx = args;
 	bool start_server = true;
-	INIT_LIST_HEAD(tx_info_frame_list);
 
 	/* init libevent */
 	event_init();
