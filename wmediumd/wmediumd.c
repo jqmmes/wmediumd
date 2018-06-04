@@ -781,6 +781,7 @@ static void threaded_process_messages_cb(struct wmediumd *ctx, struct nl_msg *ms
 			struct hwsim_tx_rate_flag *tx_rates_flag =
 				(struct hwsim_tx_rate_flag *)
 				nla_data(attrs[HWSIM_ATTR_TX_INFO_FLAGS]);
+			printf("rcv_tx_flags[0]= %d", tx_rates_flag[0].flags);
 
 			u64 cookie = nla_get_u64(attrs[HWSIM_ATTR_COOKIE]);
 			u32 freq;

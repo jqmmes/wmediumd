@@ -201,8 +201,8 @@ typedef uint64_t u64;
  *
  */
 struct hwsim_tx_rate_flag {
-	int8_t idx;
-	uint16_t flags;
+	signed char idx;
+	unsigned short flags;
 };
 
 
